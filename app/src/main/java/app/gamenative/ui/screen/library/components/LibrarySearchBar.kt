@@ -1,5 +1,8 @@
 package app.gamenative.ui.screen.library.components
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -33,6 +37,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.gamenative.PrefManager
 import app.gamenative.data.LibraryItem
+import app.gamenative.data.GameSource
 import app.gamenative.ui.data.LibraryState
 import app.gamenative.ui.internal.fakeAppInfo
 import app.gamenative.ui.theme.PluviaTheme
@@ -64,9 +69,20 @@ internal fun LibrarySearchBar(
         }
     }
 
+    // Prevent focus by default, so it doesn't scoop up every controller input for focus
+    val allowFocusing = remember { mutableStateOf(false)  }
+
     // Modern search field with rounded corners
     Box(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) {
+                // When tapped, allow and request focus
+                allowFocusing.value = true
+            },
         contentAlignment = Alignment.CenterStart
     ) {
         TextField(
@@ -75,7 +91,8 @@ internal fun LibrarySearchBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp)
-                .clip(RoundedCornerShape(16.dp)),
+                .clip(RoundedCornerShape(16.dp))
+                .focusable(allowFocusing.value),
             placeholder = {
                 Text(
                     text = "Search your games...",
@@ -136,7 +153,7 @@ private fun Preview_LibrarySearchBar() {
                         val item = fakeAppInfo(idx)
                         LibraryItem(
                             index = idx,
-                            appId = item.id,
+                            appId = "${GameSource.STEAM.name}_${item.id}",
                             name = item.name,
                             iconHash = item.iconHash,
                         )

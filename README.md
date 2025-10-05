@@ -10,7 +10,7 @@ This is a fork of [Pluvia](https://github.com/oxters168/Pluvia), a Steam client 
 ## How to Use
 
 (Note that GameNative is still in its early stages, and all games may not work, or may require tweaking to get working well)
-1. Download the latest release from the [Releases](https://github.com/utkarshdalal/GameNative/releases) page
+1. Download the latest release [here](https://github.com/utkarshdalal/GameNative/releases/download/gamenative-v0.4.0/gamenative-v0.4.0.apk)
 2. Install the APK on your Android device
 3. Login to your Steam account
 4. Install your game
@@ -19,11 +19,13 @@ This is a fork of [Pluvia](https://github.com/oxters168/Pluvia), a Steam client 
 ## Support
 To report issues or receive support, join the [Discord server](https://discord.gg/2hKv4VfZfE)
 
+You can support GameNative on Ko-fi at https://ko-fi.com/gamenative
+
 ## Building
 ### IF YOU JUST WANT TO USE THE APP, PLEASE SEE THE HOW TO USE SECTION ABOVE. THIS IS ONLY NEEDED IF YOU WANT TO CONTRIBUTE FOR DEVELOPMENT.
 1. I use a normal build in Android studio. Hit me up if you can't figure out how to build.
-2. You will need to download [imagefs_gamenative](https://drive.google.com/file/d/1IfPTwHKcGbhrRBFd0JLBVvIdeA9bFocE/view?usp=sharing) and [imagefs_patches_gamenative](https://drive.google.com/file/d/1RJb204kybzigEcjHegh7y1T8lcXb_6wG/view?usp=drive_link) for this to work and place them in the `src/main/assets` folder.
-These files are available on request for legitimate development purposes. Google Drive has blocked access to them as they are compressed archives. Please write to me on Discord and I can share them with you there.
+2. You will need to download imagefs_gamenative and imagefs_patches_gamenative for this to work and place them in the `src/main/assets` folder.
+These files are available on request for legitimate development purposes. Please write to me on Discord and I can share them with you there.
 
 ## Community
 

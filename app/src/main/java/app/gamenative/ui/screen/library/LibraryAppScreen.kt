@@ -71,7 +71,11 @@ import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import app.gamenative.Constants
 import app.gamenative.R
+import app.gamenative.data.DepotInfo
+import app.gamenative.data.LibraryItem
 import app.gamenative.data.SteamApp
+import app.gamenative.enums.OS
+import app.gamenative.enums.OSArch
 import app.gamenative.service.SteamService
 import app.gamenative.ui.component.LoadingScreen
 import app.gamenative.ui.component.dialog.ContainerConfigDialog
@@ -126,7 +130,10 @@ import app.gamenative.enums.SaveLocation
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.ui.graphics.compositeOver
+import app.gamenative.PluviaApp
+import app.gamenative.events.AndroidEvent
 import app.gamenative.utils.MarkerUtils
+import kotlinx.coroutines.withContext
 
 // https://partner.steamgames.com/doc/store/assets/libraryassets#4
 
@@ -170,25 +177,28 @@ private fun SkeletonText(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppScreen(
-    appId: Int,
+    libraryItem: LibraryItem,
     onClickPlay: (Boolean) -> Unit,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    val gameId = libraryItem.gameId
+    val appId = libraryItem.appId
+
     val appInfo by remember(appId) {
-        mutableStateOf(SteamService.getAppInfoOf(appId)!!)
+        mutableStateOf(SteamService.getAppInfoOf(gameId)!!)
     }
 
     var downloadInfo by remember(appId) {
-        mutableStateOf(SteamService.getAppDownloadInfo(appId))
+        mutableStateOf(SteamService.getAppDownloadInfo(gameId))
     }
     var downloadProgress by remember(appId) {
         mutableFloatStateOf(downloadInfo?.getProgress() ?: 0f)
     }
     var isInstalled by remember(appId) {
-        mutableStateOf(SteamService.isAppInstalled(appId))
+        mutableStateOf(SteamService.isAppInstalled(gameId))
     }
 
     val isValidToDownload by remember(appId) {
@@ -219,10 +229,10 @@ fun AppScreen(
     DisposableEffect(downloadInfo) {
         val onDownloadProgress: (Float) -> Unit = {
             if (it >= 1f) {
-                isInstalled = SteamService.isAppInstalled(appId)
+                isInstalled = SteamService.isAppInstalled(gameId)
                 downloadInfo = null
                 isInstalled = true
-                MarkerUtils.addMarker(getAppDirPath(appId), Marker.DOWNLOAD_COMPLETE_MARKER)
+                MarkerUtils.addMarker(getAppDirPath(gameId), Marker.DOWNLOAD_COMPLETE_MARKER)
             }
             downloadProgress = it
         }
@@ -324,7 +334,7 @@ fun AppScreen(
             if (writePermissionGranted && readPermissionGranted) {
                 hasStoragePermission = true
 
-                val depots = SteamService.getDownloadableDepots(appId)
+                val depots = SteamService.getDownloadableDepots(gameId)
                 Timber.i("There are ${depots.size} depots belonging to $appId")
                 // How much free space is on disk
                 val availableBytes = StorageUtils.getAvailableSpace(SteamService.defaultStoragePath)
@@ -378,10 +388,10 @@ fun AppScreen(
                         "game_name" to appInfo.name
                     ))
                 downloadInfo?.cancel()
-                SteamService.deleteApp(appId)
+                SteamService.deleteApp(gameId)
                 downloadInfo = null
                 downloadProgress = 0f
-                isInstalled = SteamService.isAppInstalled(appId)
+                isInstalled = SteamService.isAppInstalled(gameId)
                 msgDialogState = MessageDialogState(false)
             }
             onDismissRequest = { msgDialogState = MessageDialogState(false) }
@@ -402,8 +412,8 @@ fun AppScreen(
                         "game_name" to appInfo.name
                     ))
                 CoroutineScope(Dispatchers.IO).launch {
+                    downloadInfo = SteamService.downloadApp(gameId)
                     downloadProgress = 0f
-                    downloadInfo = SteamService.downloadApp(appId)
                     msgDialogState = MessageDialogState(false)
                 }
             }
@@ -413,12 +423,12 @@ fun AppScreen(
         DialogType.DELETE_APP -> {
             onConfirmClick = {
                 // Delete the Steam app data
-                SteamService.deleteApp(appId)
+                SteamService.deleteApp(gameId)
                 // Also delete the associated container so it will be recreated on next launch
                 ContainerUtils.deleteContainer(context, appId)
                 msgDialogState = MessageDialogState(false)
 
-                isInstalled = SteamService.isAppInstalled(appId)
+                isInstalled = SteamService.isAppInstalled(gameId)
             }
             onDismissRequest = { msgDialogState = MessageDialogState(false) }
             onDismissClick = { msgDialogState = MessageDialogState(false) }
@@ -504,10 +514,10 @@ fun AppScreen(
                         confirmBtnText = context.getString(R.string.yes),
                         dismissBtnText = context.getString(R.string.no),
                     )
-                } else if (SteamService.hasPartialDownload(appId)) {
+                } else if (SteamService.hasPartialDownload(gameId)) {
                     // Resume incomplete download
                     CoroutineScope(Dispatchers.IO).launch {
-                        downloadInfo = SteamService.downloadApp(appId)
+                        downloadInfo = SteamService.downloadApp(gameId)
                     }
                 } else if (!isInstalled) {
                     permissionLauncher.launch(
@@ -530,7 +540,7 @@ fun AppScreen(
                     downloadInfo?.cancel()
                     downloadInfo = null
                 } else {
-                    downloadInfo = SteamService.downloadApp(appId)
+                    downloadInfo = SteamService.downloadApp(gameId)
                 }
             },
             onDeleteDownloadClick = {
@@ -543,7 +553,9 @@ fun AppScreen(
                     dismissBtnText = context.getString(R.string.no)
                 )
             },
-            onUpdateClick = { CoroutineScope(Dispatchers.IO).launch { downloadInfo = SteamService.downloadApp(appId) } },
+            onUpdateClick = { CoroutineScope(Dispatchers.IO).launch {
+                downloadInfo = SteamService.downloadApp(gameId)
+            }},
             onBack = onBack,
             optionsMenu = arrayOf(
                 AppMenuOption(
@@ -607,6 +619,8 @@ fun AppScreen(
                                 AppOptionMenuType.ResetDrm,
                                 onClick = {
                                     val container = ContainerUtils.getOrCreateContainer(context, appId)
+                                    MarkerUtils.removeMarker(getAppDirPath(gameId), Marker.STEAM_DLL_REPLACED)
+                                    MarkerUtils.removeMarker(getAppDirPath(gameId), Marker.STEAM_DLL_RESTORED)
                                     container.isNeedsUnpacking = true
                                     container.saveData()
                                 },
@@ -615,7 +629,12 @@ fun AppScreen(
                                 AppOptionMenuType.VerifyFiles,
                                 onClick = {
                                     CoroutineScope(Dispatchers.IO).launch {
-                                        downloadInfo = SteamService.downloadApp(appId)
+                                        val container = ContainerUtils.getOrCreateContainer(context, appId)
+                                        downloadInfo = SteamService.downloadApp(gameId)
+                                        MarkerUtils.removeMarker(getAppDirPath(gameId), Marker.STEAM_DLL_REPLACED)
+                                        MarkerUtils.removeMarker(getAppDirPath(gameId), Marker.STEAM_DLL_RESTORED)
+                                        container.isNeedsUnpacking = true
+                                        container.saveData()
                                     }
                                 },
                             ),
@@ -623,7 +642,12 @@ fun AppScreen(
                                 AppOptionMenuType.Update,
                                 onClick = {
                                     CoroutineScope(Dispatchers.IO).launch {
-                                        downloadInfo = SteamService.downloadApp(appId)
+                                        val container = ContainerUtils.getOrCreateContainer(context, appId)
+                                        downloadInfo = SteamService.downloadApp(gameId)
+                                        MarkerUtils.removeMarker(getAppDirPath(gameId), Marker.STEAM_DLL_REPLACED)
+                                        MarkerUtils.removeMarker(getAppDirPath(gameId), Marker.STEAM_DLL_RESTORED)
+                                        container.isNeedsUnpacking = true
+                                        container.saveData()
                                     }
                                 },
                             ),
@@ -659,20 +683,6 @@ fun AppScreen(
 //                                    }
 //                            ),
                             AppMenuOption(
-                                AppOptionMenuType.Uninstall,
-                                onClick = {
-                                    // TODO: show loading screen of delete progress
-                                    msgDialogState = MessageDialogState(
-                                        visible = true,
-                                        type = DialogType.DELETE_APP,
-                                        title = context.getString(R.string.delete_prompt_title),
-                                        message = "Are you sure you want to delete this app?",
-                                        confirmBtnText = context.getString(R.string.delete_app),
-                                        dismissBtnText = context.getString(R.string.cancel),
-                                    )
-                                },
-                            ),
-                            AppMenuOption(
                                 AppOptionMenuType.ForceCloudSync,
                                 onClick = {
                                     PostHog.capture(event = "cloud_sync_forced",
@@ -686,10 +696,10 @@ fun AppScreen(
                                         containerManager.activateContainer(container)
 
                                         val prefixToPath: (String) -> String = { prefix ->
-                                            PathType.from(prefix).toAbsPath(context, appId, SteamService.userSteamId!!.accountID)
+                                            PathType.from(prefix).toAbsPath(context, gameId, SteamService.userSteamId!!.accountID)
                                         }
                                         val syncResult = SteamService.forceSyncUserFiles(
-                                            appId = appId,
+                                            appId = gameId,
                                             prefixToPath = prefixToPath
                                         ).await()
 
@@ -710,79 +720,16 @@ fun AppScreen(
                                     }
                                 },
                             ),
-                            AppMenuOption(
-                                AppOptionMenuType.ForceDownloadRemote,
-                                onClick = {
-                                    PostHog.capture(event = "force_download_remote",
-                                        properties = mapOf(
-                                            "game_name" to appInfo.name
-                                        ))
-                                    CoroutineScope(Dispatchers.IO).launch {
-                                        val containerManager = ContainerManager(context)
-                                        val container = ContainerUtils.getOrCreateContainer(context, appId)
-                                        containerManager.activateContainer(container)
-
-                                        val prefixToPath: (String) -> String = { prefix ->
-                                            PathType.from(prefix).toAbsPath(context, appId, SteamService.userSteamId!!.accountID)
-                                        }
-                                        val syncResult = SteamService.forceSyncUserFiles(
-                                            appId = appId,
-                                            prefixToPath = prefixToPath,
-                                            preferredSave = SaveLocation.Remote,
-                                            overrideLocalChangeNumber = -1L
-                                        ).await()
-
-                                        scope.launch(Dispatchers.Main) {
-                                            when (syncResult.syncResult) {
-                                                SyncResult.Success -> {
-                                                    Toast.makeText(context, "Remote saves downloaded successfully", Toast.LENGTH_SHORT).show()
-                                                }
-                                                else -> {
-                                                    Toast.makeText(context, "Download failed: ${syncResult.syncResult}", Toast.LENGTH_SHORT).show()
-                                                }
-                                            }
-                                        }
-                                    }
-                                },
-                            ),
-                            AppMenuOption(
-                                AppOptionMenuType.ForceUploadLocal,
-                                onClick = {
-                                    PostHog.capture(event = "force_upload_local",
-                                        properties = mapOf(
-                                            "game_name" to appInfo.name
-                                        ))
-                                    CoroutineScope(Dispatchers.IO).launch {
-                                        val containerManager = ContainerManager(context)
-                                        val container = ContainerUtils.getOrCreateContainer(context, appId)
-                                        containerManager.activateContainer(container)
-
-                                        val prefixToPath: (String) -> String = { prefix ->
-                                            PathType.from(prefix).toAbsPath(context, appId, SteamService.userSteamId!!.accountID)
-                                        }
-                                        val syncResult = SteamService.forceSyncUserFiles(
-                                            appId = appId,
-                                            prefixToPath = prefixToPath,
-                                            preferredSave = SaveLocation.Local
-                                        ).await()
-
-                                        scope.launch(Dispatchers.Main) {
-                                            when (syncResult.syncResult) {
-                                                SyncResult.Success -> {
-                                                    Toast.makeText(context, "Local saves uploaded successfully", Toast.LENGTH_SHORT).show()
-                                                }
-                                                else -> {
-                                                    Toast.makeText(context, "Upload failed: ${syncResult.syncResult}", Toast.LENGTH_SHORT).show()
-                                                }
-                                            }
-                                        }
-                                    }
-                                },
-                            ),
                         )
                     } else {
                         emptyArray()
                     }
+                ),
+                AppMenuOption(
+                    optionType = AppOptionMenuType.SubmitFeedback,
+                    onClick = {
+                        PluviaApp.events.emit(AndroidEvent.ShowGameFeedback(appId))
+                    },
                 ),
                 (
                     AppMenuOption(

@@ -25,7 +25,7 @@ public class Container {
         THUMBSTICK_UP, THUMBSTICK_DOWN, THUMBSTICK_LEFT, THUMBSTICK_RIGHT
     }
 
-    public static final String DEFAULT_ENV_VARS = "ZINK_DESCRIPTORS=lazy ZINK_DEBUG=compact MESA_SHADER_CACHE_DISABLE=false MESA_SHADER_CACHE_MAX_SIZE=512MB mesa_glthread=true WINEESYNC=1 MESA_VK_WSI_PRESENT_MODE=mailbox TU_DEBUG=noconform DXVK_FRAME_RATE=30";
+    public static final String DEFAULT_ENV_VARS = "ZINK_DESCRIPTORS=lazy ZINK_DEBUG=compact MESA_SHADER_CACHE_DISABLE=false MESA_SHADER_CACHE_MAX_SIZE=512MB mesa_glthread=true WINEESYNC=1 MESA_VK_WSI_PRESENT_MODE=mailbox TU_DEBUG=noconform DXVK_FRAME_RATE=60";
     public static final String DEFAULT_SCREEN_SIZE = "854x480";
     public static String DEFAULT_GRAPHICS_DRIVER = "vortek";
     public static final String DEFAULT_AUDIO_DRIVER = "alsa";
@@ -40,7 +40,7 @@ public class Container {
     public static final String STEAM_TYPE_LIGHT = "light";
     public static final String STEAM_TYPE_ULTRALIGHT = "ultralight";
     public static final byte MAX_DRIVE_LETTERS = 8;
-    public final int id;
+    public final String id;
     private String name;
     private String screenSize = DEFAULT_SCREEN_SIZE;
     private String envVars = DEFAULT_ENV_VARS;
@@ -54,6 +54,7 @@ public class Container {
     private String wineVersion = WineInfo.MAIN_WINE_VERSION.identifier();
     private boolean showFPS;
     private boolean launchRealSteam;
+    private boolean allowSteamUpdates;
     private boolean wow64Mode = true;
     private boolean needsUnpacking = true;
     private byte startupSelection = STARTUP_SELECTION_AGGRESSIVE;
@@ -88,8 +89,10 @@ public class Container {
     private byte dinputMapperType = 1;  // 1=standard, 2=XInput mapper
     // Disable external mouse input
     private boolean disableMouseInput = false;
+    // Touchscreen mode
+    private boolean touchscreenMode = false;
     // Steam client type for selecting appropriate Box64 RC config: normal, light, ultralight
-    private String steamType = STEAM_TYPE_NORMAL;
+    private String steamType = DefaultVersion.STEAM_TYPE;
 
     // Emulate keyboard/mouse using controller: left stick=WASD, right stick=mouse
     private boolean emulateKeyboardMouse = false;
@@ -101,7 +104,6 @@ public class Container {
     }
 
     public void setGraphicsDriverVersion(String graphicsDriverVersion) {
-        Log.d("Container", "Setting graphicsDriverVersion: " + graphicsDriverVersion);
         this.graphicsDriverVersion = graphicsDriverVersion;
     }
 
@@ -140,7 +142,7 @@ public class Container {
         this.executablePath = executablePath != null ? executablePath : "";
     }
 
-    public Container(int id) {
+    public Container(String id) {
         this.id = id;
         this.name = "Container-"+id;
     }
@@ -263,6 +265,14 @@ public class Container {
 
     public void setLaunchRealSteam(boolean launchRealSteam) {
         this.launchRealSteam = launchRealSteam;
+    }
+
+    public boolean isAllowSteamUpdates() {
+        return allowSteamUpdates;
+    }
+
+    public void setAllowSteamUpdates(boolean allowSteamUpdates) {
+        this.allowSteamUpdates = allowSteamUpdates;
     }
 
     public boolean isSdlControllerAPI() {
@@ -514,6 +524,7 @@ public class Container {
             data.put("cpuListWoW64", cpuListWoW64);
             data.put("graphicsDriver", graphicsDriver);
             data.put("graphicsDriverVersion", graphicsDriverVersion); // Ensure this is added
+            if (!graphicsDriverConfig.isEmpty()) data.put("graphicsDriverConfig", graphicsDriverConfig);
             data.put("dxwrapper", dxwrapper);
             if (!dxwrapperConfig.isEmpty()) data.put("dxwrapperConfig", dxwrapperConfig);
             data.put("audioDriver", audioDriver);
@@ -521,6 +532,7 @@ public class Container {
             data.put("drives", drives);
             data.put("showFPS", showFPS);
             data.put("launchRealSteam", launchRealSteam);
+            data.put("allowSteamUpdates", allowSteamUpdates);
             data.put("inputType", inputType);
             data.put("dinputMapperType", dinputMapperType);
             data.put("wow64Mode", wow64Mode);
@@ -542,6 +554,8 @@ public class Container {
             data.put("sdlControllerAPI", sdlControllerAPI);
             // Disable mouse input flag
             data.put("disableMouseInput", disableMouseInput);
+            // Touchscreen mode flag
+            data.put("touchscreenMode", touchscreenMode);
             data.put("installPath", installPath);
             data.put("steamType", steamType);
             data.put("language", language);
@@ -589,6 +603,9 @@ public class Container {
                 case "graphicsDriverVersion":
                     setGraphicsDriverVersion(data.getString(key));
                     break;
+                case "graphicsDriverConfig" :
+                    setGraphicsDriverConfig(data.getString(key));
+                    break;
                 case "wincomponents" :
                     setWinComponents(data.getString(key));
                     break;
@@ -606,6 +623,9 @@ public class Container {
                     break;
                 case "launchRealSteam" :
                     setLaunchRealSteam(data.getBoolean(key));
+                    break;
+                case "allowSteamUpdates" :
+                    setAllowSteamUpdates(data.getBoolean(key));
                     break;
                 case "steamType" :
                     setSteamType(data.getString(key));
@@ -627,7 +647,6 @@ public class Container {
                     break;
                 case "extraData" : {
                     JSONObject extraData = data.getJSONObject(key);
-                    checkObsoleteOrMissingProperties(extraData);
                     setExtraData(extraData);
                     break;
                 }
@@ -681,6 +700,9 @@ public class Container {
                     break;
                 case "disableMouseInput" :
                     setDisableMouseInput(data.getBoolean(key));
+                    break;
+                case "touchscreenMode" :
+                    setTouchscreenMode(data.getBoolean(key));
                     break;
                 case "installPath":
                     setInstallPath(data.getString(key));
@@ -822,5 +844,14 @@ public class Container {
 
     public void setDisableMouseInput(boolean disableMouseInput) {
         this.disableMouseInput = disableMouseInput;
+    }
+
+    // Touchscreen mode
+    public boolean isTouchscreenMode() {
+        return touchscreenMode;
+    }
+
+    public void setTouchscreenMode(boolean touchscreenMode) {
+        this.touchscreenMode = touchscreenMode;
     }
 }

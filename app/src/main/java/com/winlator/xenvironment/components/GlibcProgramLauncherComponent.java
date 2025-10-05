@@ -34,6 +34,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import app.gamenative.service.SteamService;
+
 public class GlibcProgramLauncherComponent extends GuestProgramLauncherComponent {
     private String guestExecutable;
     private static int pid = -1;
@@ -43,7 +45,7 @@ public class GlibcProgramLauncherComponent extends GuestProgramLauncherComponent
     private String box64Version = DefaultVersion.BOX64;
     private String box86Preset = Box86_64Preset.COMPATIBILITY;
     private String box64Preset = Box86_64Preset.COMPATIBILITY;
-    private String steamType = Container.STEAM_TYPE_NORMAL;
+    private String steamType = DefaultVersion.STEAM_TYPE;
     private Callback<Integer> terminationCallback;
     private static final Object lock = new Object();
     private boolean wow64Mode = true;
@@ -84,6 +86,7 @@ public class GlibcProgramLauncherComponent extends GuestProgramLauncherComponent
             if (preUnpack != null) preUnpack.run();
             pid = execGuestProgram();
             Log.d("GlibcProgramLauncherComponent", "Process " + pid + " started");
+            SteamService.setGameRunning(true);
         }
     }
 
@@ -105,6 +108,7 @@ public class GlibcProgramLauncherComponent extends GuestProgramLauncherComponent
                     );
                     Process.killProcess(subProcess.pid);
                 }
+                SteamService.setGameRunning(false);
             }
         }
     }
@@ -280,6 +284,7 @@ public class GlibcProgramLauncherComponent extends GuestProgramLauncherComponent
             synchronized (lock) {
                 pid = -1;
             }
+            SteamService.setGameRunning(false);
             if (terminationCallback != null) terminationCallback.call(status);
         });
     }
