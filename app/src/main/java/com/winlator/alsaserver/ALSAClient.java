@@ -1,213 +1,218 @@
 package com.winlator.alsaserver;
 
-import android.content.Context;
-import android.media.AudioFormat;
-import android.media.AudioManager;
-import android.media.AudioTrack;
-import android.util.Log;
-
-import com.winlator.core.KeyValueSet;
-import com.winlator.math.Mathf;
 import com.winlator.sysvshm.SysVSharedMemory;
+
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 public class ALSAClient {
-    private static short framesPerBuffer = 256;
-    private ByteBuffer auxBuffer;
-    private int bufferCapacity;
-    private int bufferSize;
-    private byte frameBytes;
-    protected final Options options;
-    private int position;
-    private ByteBuffer sharedBuffer;
-    private DataType dataType = DataType.U8;
-    private AudioTrack audioTrack = null;
-    private byte channels = 2;
-    private int sampleRate = 0;
-    private short previousUnderrunCount = 0;
-
     public enum DataType {
-        U8(1),
-        S16LE(2),
-        S16BE(2),
-        FLOATLE(4),
-        FLOATBE(4);
-
+        U8(1), S16LE(2), S16BE(2), FLOATLE(4), FLOATBE(4);
         public final byte byteCount;
 
         DataType(int byteCount) {
-            this.byteCount = (byte) byteCount;
+            this.byteCount = (byte)byteCount;
         }
     }
+    private DataType dataType = DataType.U8;
+    private byte channelCount = 2;
+    private int sampleRate = 0;
+    private int position;
+    private int bufferSize;
+    private int frameBytes;
+    private ByteBuffer sharedBuffer;
+    private boolean playing = false;
+    private long streamPtr = 0;
+    private long mirrorStreamPtr = 0;
 
-    public static class Options {
-        public short latencyMillis = 40;
-        public byte performanceMode = 1;
-        public float volume = 1.0f;
+    private boolean reflectorMode;
 
-        public static Options fromKeyValueSet(KeyValueSet config) {
-            Options options;
-            if (config == null || config.isEmpty()) {
-                return new Options();
-            }
-            options = new Options();
-            switch (config.get("performanceMode")) {
-                case "0":
-                    options.performanceMode = (byte) 0;
-                    break;
-                case "1":
-                    options.performanceMode = (byte) 1;
-                    break;
-                case "2":
-                    options.performanceMode = (byte) 2;
-                    break;
-            }
-            options.volume = config.getFloat("volume", 1.0f);
-            options.latencyMillis = (short) config.getInt("latencyMillis", 40);
-            return options;
-        }
-    }
-
-    public ALSAClient(Options options) {
-        this.options = options;
+    static {
+        System.loadLibrary("extras");
     }
 
     public void release() {
-        ByteBuffer byteBuffer = this.sharedBuffer;
-        if (byteBuffer != null) {
-            SysVSharedMemory.unmapSHMSegment(byteBuffer, byteBuffer.capacity());
-            this.sharedBuffer = null;
+        if (sharedBuffer != null) {
+            SysVSharedMemory.unmapSHMSegment(sharedBuffer, sharedBuffer.capacity());
+            sharedBuffer = null;
         }
-        AudioTrack audioTrack = this.audioTrack;
-        if (audioTrack != null) {
-            audioTrack.pause();
-            this.audioTrack.flush();
-            this.audioTrack.release();
-            this.audioTrack = null;
-        }
-    }
 
-    public static int getPCMEncoding(DataType dataType) {
-        switch (dataType) {
-            case U8:
-                return 3;  // AudioFormat.ENCODING_PCM_8BIT
-            case S16LE:
-            case S16BE:
-                return 2;  // AudioFormat.ENCODING_PCM_16BIT
-            case FLOATLE:
-            case FLOATBE:
-                return 4;  // AudioFormat.ENCODING_PCM_FLOAT
-            default:
-                return 1;  // AudioFormat.ENCODING_DEFAULT
+        if (reflectorMode) {
+            simulatedStop(streamPtr);
+            stop(mirrorStreamPtr);
+            simulatedClose(streamPtr);
+            close(mirrorStreamPtr);
+        } else {
+            stop(streamPtr);
+            close(streamPtr);
         }
-    }
 
-    /**
-     * Map channel count → channel mask.
-     * 1 channel → MONO, 2 + channels → STEREO (or wider).
-     */
-    public static int getChannelConfig(int channels) {
-        return (channels <= 1) ? 4   // AudioFormat.CHANNEL_OUT_MONO
-                : 12; // AudioFormat.CHANNEL_OUT_STEREO | FRONT_LEFT/RIGHT
+        playing = false;
+        streamPtr = 0;
+        mirrorStreamPtr = 0;
     }
 
     public void prepare() {
-        this.position = 0;
-        this.previousUnderrunCount = (short) 0;
-        this.frameBytes = (byte) (this.channels * this.dataType.byteCount);
+        position = 0;
+        frameBytes = channelCount * dataType.byteCount;
         release();
-        if (isValidBufferSize()) {
-            AudioFormat format = new AudioFormat.Builder().setEncoding(getPCMEncoding(this.dataType)).setSampleRate(this.sampleRate).setChannelMask(getChannelConfig(this.channels)).build();
-            AudioTrack build = new AudioTrack.Builder().setPerformanceMode(this.options.performanceMode).setAudioFormat(format).setBufferSizeInBytes(getBufferSizeInBytes()).build();
-            this.audioTrack = build;
-            this.bufferCapacity = build.getBufferCapacityInFrames();
-            float f = this.options.volume;
-            if (f != 1.0f) {
-                this.audioTrack.setVolume(f);
-            }
-            this.audioTrack.play();
+
+        if (!isValidBufferSize()) return;
+
+        if (reflectorMode) {
+            // In reflector mode, create both the pacer and the real stream
+            streamPtr = simulatedCreate(dataType.ordinal(), channelCount, sampleRate, bufferSize);
+            mirrorStreamPtr = create(dataType.ordinal(), channelCount, sampleRate, bufferSize);
+        } else {
+            // In normal mode, create only the real stream and assign it to streamPtr
+            streamPtr = create(dataType.ordinal(), channelCount, sampleRate, bufferSize);
+            mirrorStreamPtr = 0; // Ensure mirror is null
         }
+
+        if (streamPtr > 0) start();
     }
 
     public void start() {
-        AudioTrack audioTrack = this.audioTrack;
-        if (audioTrack != null && audioTrack.getPlayState() != 3) {
-            this.audioTrack.play();
+        if (streamPtr > 0 && !playing) {
+            if (reflectorMode) {
+                simulatedStart(streamPtr);
+                start(mirrorStreamPtr);
+            } else {
+                start(streamPtr);
+            }
+            playing = true;
         }
     }
 
     public void stop() {
-        AudioTrack audioTrack = this.audioTrack;
-        if (audioTrack != null) {
-            audioTrack.stop();
-            this.audioTrack.flush();
+        if (streamPtr > 0 && playing) {
+            if (reflectorMode) {
+                simulatedStop(streamPtr);
+                stop(mirrorStreamPtr);
+            } else {
+                stop(streamPtr);
+            }
+            playing = false;
         }
+        drain();
     }
 
     public void pause() {
-        AudioTrack audioTrack = this.audioTrack;
-        if (audioTrack != null) {
-            audioTrack.pause();
+        if (streamPtr > 0) {
+            if (reflectorMode) {
+                simulatedPause(streamPtr);
+                pause(mirrorStreamPtr);
+            } else {
+                pause(streamPtr);
+            }
+            playing = false;
         }
     }
 
     public void drain() {
-        AudioTrack audioTrack = this.audioTrack;
-        if (audioTrack != null) {
-            audioTrack.flush();
+        if (streamPtr > 0) {
+            if (reflectorMode) {
+                simulatedFlush(streamPtr);
+                flush(mirrorStreamPtr);
+            } else {
+                flush(streamPtr);
+            }
         }
     }
 
-    public void writeDataToTrack(ByteBuffer data) {
-        DataType dataType = this.dataType;
+    public void writeDataToStream(ByteBuffer data) {
+        ByteBuffer mirrorData = data.duplicate();
+
         if (dataType == DataType.S16LE || dataType == DataType.FLOATLE) {
             data.order(ByteOrder.LITTLE_ENDIAN);
+            mirrorData.order(ByteOrder.LITTLE_ENDIAN);
         } else if (dataType == DataType.S16BE || dataType == DataType.FLOATBE) {
             data.order(ByteOrder.BIG_ENDIAN);
+            mirrorData.order(ByteOrder.BIG_ENDIAN);
         }
-        if (this.audioTrack != null) {
-            data.position(0);
-            do {
-                try {
-                    int bytesWritten = this.audioTrack.write(data, data.remaining(), 0);
-                    if (bytesWritten < 0) {
-                        break;
-                    } else {
-                        increaseBufferSizeIfUnderrunOccurs();
-                    }
-                } catch (Exception e) {
-                }
-            } while (data.position() != data.limit());
-            this.position += data.position();
-            data.rewind();
+
+        int numFrames = data.limit() / frameBytes;
+
+        if (playing) {
+            if (reflectorMode) {
+                // Reflector Mode: Write to pacer, mirror to real stream
+                int framesWritten = simulatedWrite(streamPtr, data, numFrames);
+                write(mirrorStreamPtr, mirrorData, numFrames);
+                if (framesWritten > 0) position += framesWritten;
+                data.rewind();
+                mirrorData.rewind();
+            } else {
+                // Normal Mode: Write directly to the real stream
+                int framesWritten = write(streamPtr, data, numFrames);
+                if (framesWritten > 0) position += framesWritten;
+                data.rewind();
+            }
         }
     }
 
-    private void increaseBufferSizeIfUnderrunOccurs() {
-        int i;
-        int underrunCount = this.audioTrack.getUnderrunCount();
-        if (underrunCount > this.previousUnderrunCount && (i = this.bufferSize) < this.bufferCapacity) {
-            this.previousUnderrunCount = (short) underrunCount;
-            int i2 = i + framesPerBuffer;
-            this.bufferSize = i2;
-            this.audioTrack.setBufferSizeInFrames(i2);
+    /**
+     * This is the new method to handle audio device changes.
+     * It will be called from the Android system when a device is connected or disconnected.
+     */
+    public void onAudioDeviceChanged() {
+        // This entire feature is designed for reflector mode.
+        // If we are in normal mode, the underlying connection to Wine is
+        // likely broken, and we should do nothing.
+        if (!reflectorMode) {
+            System.out.println("Audio device change detected, but reflector mode is off. Ignoring.");
+            return;
         }
+
+        // --- REFLECTOR MODE LOGIC ---
+        // The pacer (streamPtr) is safe. We only need to rebuild the hardware stream (mirrorStreamPtr).
+        if (mirrorStreamPtr != 0) {
+            System.out.println("Tearing down old playback stream...");
+            stop(mirrorStreamPtr);
+            close(mirrorStreamPtr);
+            mirrorStreamPtr = 0;
+        }
+
+        final int MAX_RETRIES = 5;
+        final int RETRY_DELAY_MS = 200;
+
+        for (int i = 0; i < MAX_RETRIES; i++) {
+            System.out.println("Attempting to rebuild playback stream (Attempt " + (i + 1) + ")");
+            long newStreamPtr = create(dataType.ordinal(), channelCount, sampleRate, bufferSize);
+
+            if (newStreamPtr > 0) {
+                if (playing) {
+                    int result = start(newStreamPtr);
+                    if (result == 0) { // AAUDIO_OK
+                        mirrorStreamPtr = newStreamPtr;
+                        System.out.println("Successfully resumed playback on new stream.");
+                        return;
+                    } else {
+                        System.out.println("Failed to start new stream, result code: " + result + ". Retrying...");
+                        close(newStreamPtr);
+                    }
+                } else {
+                    mirrorStreamPtr = newStreamPtr;
+                    System.out.println("Successfully created new stream while paused.");
+                    return;
+                }
+            }
+            try {
+                Thread.sleep(RETRY_DELAY_MS);
+            } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
+        }
+        System.out.println("Failed to rebuild playback stream after " + MAX_RETRIES + " attempts.");
     }
 
     public int pointer() {
-        if (this.audioTrack != null) {
-            return this.position / this.frameBytes;
-        }
-        return 0;
+        return position;
     }
 
     public void setDataType(DataType dataType) {
         this.dataType = dataType;
     }
 
-    public void setChannels(int channels) {
-        this.channels = (byte) channels;
+    public void setChannelCount(int channelCount) {
+        this.channelCount = (byte)channelCount;
     }
 
     public void setSampleRate(int sampleRate) {
@@ -219,51 +224,61 @@ public class ALSAClient {
     }
 
     public ByteBuffer getSharedBuffer() {
-        return this.sharedBuffer;
+        return sharedBuffer;
     }
 
     public void setSharedBuffer(ByteBuffer sharedBuffer) {
-        if (sharedBuffer != null) {
-            ByteBuffer allocateDirect = ByteBuffer.allocateDirect(getBufferSizeInBytes());
-            ByteOrder byteOrder = ByteOrder.LITTLE_ENDIAN;
-            this.auxBuffer = allocateDirect.order(byteOrder);
-            this.sharedBuffer = sharedBuffer.order(byteOrder);
-            return;
-        }
-        this.auxBuffer = null;
-        this.sharedBuffer = null;
+        this.sharedBuffer = sharedBuffer;
     }
 
-    public ByteBuffer getAuxBuffer() {
-        return this.auxBuffer;
+    public DataType getDataType() {
+        return dataType;
+    }
+
+    public byte getChannelCount() {
+        return channelCount;
+    }
+
+    public int getSampleRate() {
+        return sampleRate;
+    }
+
+    public int getBufferSize() {
+        return bufferSize;
     }
 
     public int getBufferSizeInBytes() {
-        return this.bufferSize * this.frameBytes;
-    }
-
-    public static int latencyMillisToBufferSize(int latencyMillis, int channels, DataType dataType, int sampleRate) {
-        byte frameBytes = (byte) (dataType.byteCount * channels);
-        int bufferSize = (int) Mathf.roundTo((latencyMillis * sampleRate) / 1000.0f, framesPerBuffer, false);
         return bufferSize * frameBytes;
     }
 
     private boolean isValidBufferSize() {
-        int i = this.bufferSize;
-        return i % this.frameBytes == 0 && i > 0;
+        return (getBufferSizeInBytes() % frameBytes == 0) && bufferSize > 0;
     }
 
-    public static void assignFramesPerBuffer(Context context) {
-        try {
-            AudioManager am = (AudioManager) context.getSystemService("audio");
-            String framesPerBufferStr = am.getProperty("android.media.property.OUTPUT_FRAMES_PER_BUFFER");
-            short parseShort = Short.parseShort(framesPerBufferStr);
-            framesPerBuffer = parseShort;
-            if (parseShort == 0) {
-                framesPerBuffer = (short) 256;
-            }
-        } catch (Exception e) {
-            framesPerBuffer = (short) 256;
-        }
+    public int computeLatencyMillis() {
+        return (int)(((float)bufferSize / sampleRate) * 1000);
     }
+
+    public void setReflectorMode(boolean enabled) {
+        this.reflectorMode = enabled;
+    }
+
+    private native long simulatedCreate(int format, byte channelCount, int sampleRate, int bufferSize);
+    private native long create(int format, byte channelCount, int sampleRate, int mirrorBufferSize);
+    private native int simulatedWrite(long streamPtr, ByteBuffer buffer, int numberFrames);
+    private native int write(long mirrorStreamPtr, ByteBuffer mirrorBuffer, int numFrames);
+    private native void simulatedStart(long streamPtr);
+    private native int start(long mirrorStreamPtr);
+
+    private native void simulatedStop(long streamPtr);
+    private native void stop(long mirrorStreamPtr);
+
+    private native void simulatedPause(long streamPtr);
+    private native void pause(long mirrorStreamPtr);
+
+    private native void simulatedFlush(long streamPtr);
+    private native void flush(long mirrorStreamPtr);
+
+    private native void simulatedClose(long streamPtr);
+    private native void close(long mirrorStreamPtr);
 }

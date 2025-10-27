@@ -1,43 +1,69 @@
 package com.winlator.xenvironment.components;
 
-import android.util.Log;
+import android.util.SparseArray;
 
+import com.winlator.alsaserver.ALSAClient;
 import com.winlator.alsaserver.ALSAClientConnectionHandler;
 import com.winlator.alsaserver.ALSARequestHandler;
-import com.winlator.core.KeyValueSet;
+import com.winlator.xconnector.Client;
 import com.winlator.xconnector.UnixSocketConfig;
 import com.winlator.xconnector.XConnectorEpoll;
 import com.winlator.xenvironment.EnvironmentComponent;
-import com.winlator.alsaserver.ALSAClient;
 
 public class ALSAServerComponent extends EnvironmentComponent {
     private XConnectorEpoll connector;
-    private final ALSAClient.Options options;
     private final UnixSocketConfig socketConfig;
 
-    public ALSAServerComponent(UnixSocketConfig socketConfig, ALSAClient.Options options) {
+    private final boolean reflectorMode;
+
+    public ALSAServerComponent(UnixSocketConfig socketConfig, boolean reflectorMode) {
         this.socketConfig = socketConfig;
-        this.options = options;
+        this.reflectorMode = reflectorMode; // Store it
     }
 
-    @Override // com.winlator.xenvironment.EnvironmentComponent
+    @Override
     public void start() {
-        if (this.connector != null) {
+        if (connector != null) return;
+        ALSAClientConnectionHandler connectionHandler = new ALSAClientConnectionHandler(reflectorMode);
+        connector = new XConnectorEpoll(socketConfig, connectionHandler, new ALSARequestHandler());
+        connector.setMultithreadedClients(true);
+        connector.start();
+    }
+
+    @Override
+    public void stop() {
+        if (connector != null) {
+            SparseArray<Client> clients = connector.getConnectedClients();
+            for (int i = 0; i < clients.size(); i++) {
+                Object tag = clients.valueAt(i).getTag();
+                if (tag instanceof ALSAClient) {
+                    ((ALSAClient) tag).release();
+                }
+            }
+            connector.stop();
+            connector = null;
+        }
+    }
+
+    /**
+     * This method is called from the Activity when an audio device change is detected.
+     * It iterates through all active ALSA connections and notifies them.
+     */
+    public void notifyAudioDeviceChanged() {
+        if (connector == null) {
             return;
         }
-        ALSAClient.assignFramesPerBuffer(this.environment.getContext());
-        XConnectorEpoll xConnectorEpoll = new XConnectorEpoll(this.socketConfig, new ALSAClientConnectionHandler(this.options), new ALSARequestHandler());
-        this.connector = xConnectorEpoll;
-        xConnectorEpoll.setMultithreadedClients(true);
-        this.connector.start();
-    }
 
-    @Override // com.winlator.xenvironment.EnvironmentComponent
-    public void stop() {
-        XConnectorEpoll xConnectorEpoll = this.connector;
-        if (xConnectorEpoll != null) {
-            xConnectorEpoll.stop();
-            this.connector = null;
+        // Use the new getter to access the list of clients
+        SparseArray<Client> clients = connector.getConnectedClients();
+        for (int i = 0; i < clients.size(); i++) {
+            Client client = clients.valueAt(i);
+            Object tag = client.getTag();
+            // Check if the client's tag is an ALSAClient instance
+            if (tag instanceof ALSAClient) {
+                ((ALSAClient) tag).onAudioDeviceChanged();
+            }
         }
     }
 }
+
