@@ -9,6 +9,7 @@ enum class AppOptionMenuType(val text: String) {
     ResetToDefaults("Reset container"),
     GetSupport("Get support"),
     SubmitFeedback("Submit feedback"),
+    ApplyRecommendedSettings("Apply recommended settings"),
     ResetDrm("Reset DRM"),
     Uninstall("Uninstall"),
     VerifyFiles("Verify files"),

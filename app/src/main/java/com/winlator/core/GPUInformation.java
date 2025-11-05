@@ -10,6 +10,8 @@ import com.winlator.PrefManager;
 
 import java.util.Locale;
 import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.microedition.khronos.egl.EGL10;
 import javax.microedition.khronos.egl.EGLConfig;
@@ -18,6 +20,9 @@ import javax.microedition.khronos.egl.EGLDisplay;
 import javax.microedition.khronos.opengles.GL10;
 
 public abstract class GPUInformation {
+    static {
+        System.loadLibrary("extras");
+    }
     private static ArrayMap<String, String> loadGPUInformation(Context context) {
         final Thread thread = Thread.currentThread();
         final ArrayMap<String, String> gpuInfo = new ArrayMap<>();
@@ -126,4 +131,10 @@ public abstract class GPUInformation {
         String r = getRenderer(context).toLowerCase(Locale.ENGLISH);
         return r.contains("adreno") && r.matches(".*\\b(710|720|732)\\b.*");
     }
+
+    public native static String getVersion();
+    public native static long getGPUDriverVersion();
+    public native static String getRenderer();
+    public native static long getMemorySize();
+    public native static String[] enumerateExtensions();
 }

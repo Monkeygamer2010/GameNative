@@ -30,6 +30,13 @@ import okhttp3.*
 import org.json.JSONObject
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
+import android.os.Build
+import android.content.pm.PackageManager
+import com.winlator.container.Container
+import java.security.MessageDigest
+import com.winlator.core.GPUInformation
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody.Companion.toRequestBody
 
 object SteamUtils {
 
@@ -872,5 +879,208 @@ object SteamUtils {
 
     fun getSteam3AccountId(): Long? {
         return SteamService.userSteamId?.getAccountID()?.toLong()
+    }
+
+    /**
+     * Posts a JSON payload to {baseUrl}/simulator/executeScript with device/GPU fingerprint.
+     * Required parameters are derived from the current device and app state.
+     *
+     * Notes:
+     * - game_id: if non-numeric in input, "0" will be sent
+     * - gpu_system_driver_version: Vulkan driverVersion when available, otherwise 0
+     * - token: taken from PrefManager.accessToken
+     * - clientparams: pipe-separated fingerprint per backend expectation
+     */
+    suspend fun executeSimulatorScript(
+        context: Context,
+        baseUrl: String,
+        gameId: String,
+        gameType: Int = 2,
+        container: Container
+    ): String {
+        val url = baseUrl.trimEnd('/') + "/simulator/executeScript"
+
+        val gpuVendor = runCatching { GPUInformation.getVendor(context) }.getOrDefault("")
+        val gpuDeviceName = runCatching { GPUInformation.getRenderer(context) }.getOrDefault("")
+        val gpuVersion = extractAdrenoModel(gpuDeviceName)
+        val gpuSystemDriverVersion = runCatching { GPUInformation.getGPUDriverVersion() }.getOrDefault(0)
+
+        val clientParams = buildClientParams(context, gpuDeviceName, gpuVendor, container)
+        val token = "fake-token"
+        val timeMs = System.currentTimeMillis().toString()
+        val normalizedGameId = if (gameId.all { it.isDigit() }) gameId else "0"
+
+        // Fetch backend-specific game detail id to use as game_id, fallback to normalized steam app id
+        val resolvedGameId = runCatching {
+            fetchGameDetailId(baseUrl, normalizedGameId, clientParams, token, timeMs)
+        }.getOrNull() ?: normalizedGameId
+
+        val paramsForSign = mutableMapOf<String, String>().apply {
+            put("clientparams", clientParams)
+            put("game_id", resolvedGameId)
+            put("game_type", gameType.toString())
+            put("gpu_device_name", gpuDeviceName)
+            put("gpu_system_driver_version", (gpuSystemDriverVersion.toLong() and 0xFFFF_FFFFL).toString())
+            put("gpu_vendor", gpuVendor)
+            put("gpu_version", gpuVersion.toString())
+            put("time", timeMs)
+            put("token", token)
+        }
+
+        val sign = md5Lowercase(sortedParamsToQuery(paramsForSign) + "&all-egg-shell-y7ZatUDk")
+
+        val json = JSONObject().apply {
+            put("game_id", resolvedGameId)
+            put("gpu_vendor", gpuVendor)
+            put("gpu_device_name", gpuDeviceName)
+            put("gpu_version", gpuVersion)
+            put("gpu_system_driver_version", (gpuSystemDriverVersion.toLong() and 0xFFFF_FFFFL))
+            put("token", token)
+            put("clientparams", clientParams)
+            put("time", timeMs)
+            put("sign", sign)
+            put("game_type", gameType)
+        }
+
+        val req = Request.Builder()
+            .url(url)
+            .post(json.toString().toRequestBody("application/json".toMediaTypeOrNull()))
+            .header("Content-Type", "application/json")
+            .build()
+
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            http.newCall(req).execute().use { res ->
+                val body = res.body?.string().orEmpty()
+                if (!res.isSuccessful) throw IOException("HTTP ${'$'}{res.code}: ${'$'}body")
+                body
+            }
+        }
+    }
+
+    private suspend fun fetchGameDetailId(
+        baseUrl: String,
+        appId: String,
+        clientParams: String,
+        token: String,
+        timeMs: String,
+    ): String? {
+        val url = "https://gamehublite.xyz/card/getGameDetail"
+
+        val paramsForSign = mutableMapOf<String, String>().apply {
+            put("app_id", appId)
+            put("clientparams", clientParams)
+            put("time", timeMs)
+            put("token", token)
+        }
+        val sign = md5Lowercase(sortedParamsToQuery(paramsForSign) + "&all-egg-shell-y7ZatUDk")
+
+        val payload = JSONObject().apply {
+            put("sign", sign)
+            put("time", timeMs)
+            put("app_id", appId)
+            put("clientparams", clientParams)
+            put("token", token)
+        }
+
+        val req = Request.Builder()
+            .url(url)
+            .post(payload.toString().toRequestBody("application/json".toMediaTypeOrNull()))
+            .header("Content-Type", "application/json")
+            .build()
+
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            http.newCall(req).execute().use { res ->
+                val body = res.body?.string().orEmpty()
+                if (!res.isSuccessful) return@withContext null
+                runCatching {
+                    val root = JSONObject(body)
+                    if (root.optInt("code") == 200) {
+                        val data = root.optJSONObject("data")
+                        val id = data?.optLong("id")
+                        id?.toString()
+                    } else null
+                }.getOrNull()
+            }
+        }
+    }
+
+    private fun extractAdrenoModel(renderer: String): Int {
+        val lower = renderer.lowercase(Locale.ENGLISH)
+        if (!lower.contains("adreno")) return 0
+        val match = Regex("adreno[^0-9]*([0-9]{3})", RegexOption.IGNORE_CASE).find(renderer)
+        return match?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+    }
+
+    private fun buildClientParams(context: Context, gpuDeviceName: String, gpuVendor: String, container: Container): String {
+        val pkgManager = context.packageManager
+        val pkgName = context.packageName
+        val versionName = runCatching {
+            if (Build.VERSION.SDK_INT >= 33) {
+                val info = pkgManager.getPackageInfo(pkgName, PackageManager.PackageInfoFlags.of(0))
+                info.versionName ?: ""
+            } else {
+                @Suppress("DEPRECATION")
+                val info = pkgManager.getPackageInfo(pkgName, 0)
+                info.versionName ?: ""
+            }
+        }.getOrDefault("")
+
+        val dm = context.resources.displayMetrics
+
+        val sdk = Build.VERSION.SDK_INT
+        val language = Locale.getDefault().language
+        val deviceModel = getMachineName(context)
+        val appId = pkgName
+        val channel = "${'$'}appId_Official"
+        val brand = Build.BRAND
+
+        val vendorLower = gpuVendor.lowercase(Locale.ENGLISH)
+        val vendorShort = when {
+            vendorLower.contains("qualcomm") || vendorLower.contains("qcom") -> "qcom"
+            vendorLower.contains("nvidia") -> "nvidia"
+            vendorLower.contains("arm") -> "arm"
+            else -> vendorLower
+        }
+
+        val parts = listOf(
+            "5.1.0",
+            Build.VERSION.RELEASE,
+            language,
+            Build.MODEL,
+            container.screenSize.replace("x", " * "),
+            "gamehub_android",
+            "gamehub_android_Official",
+            brand,
+            "","","","","","","","",
+            "gamehub.lite",
+            gpuDeviceName,
+            vendorShort,
+        )
+        return parts.joinToString("|")
+    }
+
+    private fun sortedParamsToQuery(params: Map<String, String>): String {
+        return params.toSortedMap().entries.joinToString("&") { (k, v) -> "$k=$v" }
+    }
+
+    private fun md5Lowercase(input: String): String {
+        val md = MessageDigest.getInstance("MD5")
+        val digest = md.digest(input.toByteArray())
+        return digest.joinToString("") { b ->
+            val i = b.toInt() and 0xFF
+            (if (i < 0x10) "0" else "") + i.toString(16)
+        }
+    }
+
+    /** Convenience helper that accepts a containerId like "STEAM_12345" and extracts the game id. */
+    suspend fun executeSimulatorScriptForContainer(
+        context: Context,
+        baseUrl: String,
+        containerId: String,
+        gameType: Int = 2,
+    ): String {
+        val container = ContainerUtils.getContainer(context, containerId)
+        val steamAppId = ContainerUtils.extractGameIdFromContainerId(containerId)
+        return executeSimulatorScript(context, baseUrl, steamAppId.toString(), gameType, container)
     }
 }

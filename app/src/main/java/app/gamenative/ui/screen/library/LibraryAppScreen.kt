@@ -829,6 +829,23 @@ fun AppScreen(
                     }
                 ),
                 AppMenuOption(
+                    optionType = AppOptionMenuType.ApplyRecommendedSettings,
+                    onClick = {
+                        // Fire-and-forget call for debugging
+                        CoroutineScope(Dispatchers.IO).launch {
+                            try {
+                                SteamUtils.executeSimulatorScriptForContainer(
+                                    context = context,
+                                    baseUrl = "https://landscape-api.vgabc.com",
+                                    containerId = appId,
+                                )
+                            } catch (e: Exception) {
+                                Timber.e(e)
+                            }
+                        }
+                    },
+                ),
+                AppMenuOption(
                     optionType = AppOptionMenuType.SubmitFeedback,
                     onClick = {
                         PluviaApp.events.emit(AndroidEvent.ShowGameFeedback(appId))
