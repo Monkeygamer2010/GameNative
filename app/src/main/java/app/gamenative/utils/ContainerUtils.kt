@@ -17,7 +17,6 @@ import com.winlator.fexcore.FEXCoreManager
 import com.winlator.inputcontrols.ControlsProfile
 import com.winlator.inputcontrols.InputControlsManager
 import com.winlator.winhandler.WinHandler.PreferredInputApi
-import java.io.File
 import kotlin.Boolean
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
