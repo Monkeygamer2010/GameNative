@@ -96,6 +96,8 @@ import com.winlator.core.GPUHelper
 import com.winlator.core.WineInfo
 import com.winlator.core.WineInfo.MAIN_WINE_VERSION
 import com.winlator.fexcore.FEXCoreManager
+import com.winlator.inputcontrols.InputControlsManager
+import com.winlator.inputcontrols.ControlsProfile
 import java.util.Locale
 
 /**
@@ -123,6 +125,7 @@ fun ContainerConfigDialog(
     default: Boolean = false,
     title: String,
     initialConfig: ContainerData = ContainerData(),
+    container: Container? = null,
     onDismissRequest: () -> Unit,
     onSave: (ContainerData) -> Unit,
 ) {
@@ -470,21 +473,16 @@ fun ContainerConfigDialog(
                 if (isVortekLike) "async-1.10.3" else StringUtils.parseIdentifier(dxvkVersionsAll.getOrNull(dxvkVersionIndex) ?: DefaultVersion.DXVK)
             } else selectedVersion
             val envSet = EnvVars(config.envVars)
+            if (version.contains("async", ignoreCase = true)) {
+                envSet.put("DXVK_ASYNC", "1")
+            } else {
+                envSet.remove("DXVK_ASYNC")
+            }
             // Update dxwrapperConfig version only when DXVK wrapper selected
             val wrapperIsDxvk = StringUtils.parseIdentifier(dxWrappers[dxWrapperIndex]) == "dxvk"
             val kvs = KeyValueSet(config.dxwrapperConfig)
             if (wrapperIsDxvk) {
                 kvs.put("version", version)
-            }
-            if (version.contains("async", ignoreCase = true)) {
-                kvs.put("async", "1")
-            } else {
-                kvs.put("async", "0")
-            }
-            if (version.contains("gplasync", ignoreCase = true)) {
-                kvs.put("asyncCache", "1")
-            } else {
-                kvs.put("asyncCache", "0")
             }
             config = config.copy(envVars = envSet.toString(), dxwrapperConfig = kvs.toString())
         }
@@ -780,10 +778,11 @@ fun ContainerConfigDialog(
                                                     listOf("0", "512", "1024", "2048", "4096").indexOf("4096").coerceAtLeast(0)
 
                                                 // If transitioning from GLIBC -> BIONIC, set Box64 to default and DXVK to async-1.10.3
+                                                val envSet = EnvVars(config.envVars).apply {
+                                                    put("DXVK_ASYNC", "1")
+                                                }
                                                 val currentConfig = KeyValueSet(config.dxwrapperConfig)
                                                 currentConfig.put("version", "async-1.10.3")
-                                                currentConfig.put("async", "1")
-                                                currentConfig.put("asyncCache", "0")
                                                 config = config.copy(dxwrapperConfig = currentConfig.toString())
 
                                                 config = config.copy(
@@ -794,6 +793,7 @@ fun ContainerConfigDialog(
                                                     graphicsDriverConfig = newCfg.toString(),
                                                     box64Version = "0.3.7",
                                                     dxwrapperConfig = currentConfig.toString(),
+                                                    envVars = envSet.toString(),
                                                 )
                                             }
                                         },
@@ -1197,10 +1197,10 @@ fun ContainerConfigDialog(
                                                 val currentConfig = KeyValueSet(config.dxwrapperConfig)
                                                 currentConfig.put("version", version)
                                                 val envVarsSet = EnvVars(config.envVars)
-                                                if (version.contains("async", ignoreCase = true)) currentConfig.put("async", "1")
-                                                else currentConfig.put("async", "0")
-                                                if (version.contains("gplasync", ignoreCase = true)) currentConfig.put("asyncCache", "1")
-                                                else currentConfig.put("asyncCache", "0")
+                                                if (version.contains("async", ignoreCase = true)) envVarsSet.put(
+                                                    "DXVK_ASYNC",
+                                                    "1"
+                                                ) else envVarsSet.remove("DXVK_ASYNC")
                                                 config =
                                                     config.copy(dxwrapperConfig = currentConfig.toString(), envVars = envVarsSet.toString())
                                             },
@@ -1388,6 +1388,23 @@ fun ContainerConfigDialog(
                                 )
                             }
                             if (selectedTab == 3) SettingsGroup() {
+                                val context = LocalContext.current
+                                var showProfileEditor: ControlsProfile? by remember { mutableStateOf(null) }
+
+                                // Profile Selection Card - Prominent placement at top
+                                app.gamenative.ui.component.settings.ProfileSelectionCard(
+                                    context = context,
+                                    selectedProfileId = config.controlsProfileId,
+                                    onProfileSelected = { profileId ->
+                                        config = config.copy(controlsProfileId = profileId)
+                                    },
+                                    onEditProfile = { profile ->
+                                        showProfileEditor = profile
+                                    },
+                                    container = container
+                                )
+
+                                // Wine API Settings Section
                                 if (!default) {
                                     SettingsSwitch(
                                         colors = settingsTileColorsAlt(),
@@ -1398,7 +1415,7 @@ fun ContainerConfigDialog(
                                         },
                                     )
                                 }
-                                // Enable XInput API
+
                                 SettingsSwitch(
                                     colors = settingsTileColorsAlt(),
                                     title = { Text(text = "Enable XInput API") },
@@ -1407,7 +1424,7 @@ fun ContainerConfigDialog(
                                         config = config.copy(enableXInput = it)
                                     }
                                 )
-                                // Enable DirectInput API
+
                                 SettingsSwitch(
                                     colors = settingsTileColorsAlt(),
                                     title = { Text(text = "Enable DirectInput API") },
@@ -1416,7 +1433,7 @@ fun ContainerConfigDialog(
                                         config = config.copy(enableDInput = it)
                                     }
                                 )
-                                // DirectInput Mapper Type
+
                                 SettingsListDropdown(
                                     colors = settingsTileColors(),
                                     title = { Text(text = "DirectInput Mapper Type") },
@@ -1426,75 +1443,29 @@ fun ContainerConfigDialog(
                                         config = config.copy(dinputMapperType = if (index == 0) 1 else 2)
                                     }
                                 )
-                                // Disable external mouse input
+
+                                // Auto-hide Controls
                                 SettingsSwitch(
-                                    colors = settingsTileColorsAlt(),
-                                    title = { Text(text = "Disable Mouse Input") },
-                                    state = config.disableMouseInput,
-                                    onCheckedChange = { config = config.copy(disableMouseInput = it) }
+                                    colors = settingsTileColors(),
+                                    title = { Text(text = "Auto-hide On-Screen Controls") },
+                                    subtitle = { Text(text = "Automatically hide on-screen controls when a physical controller is connected") },
+                                    state = config.autoHideControls,
+                                    onCheckedChange = {
+                                        config = config.copy(autoHideControls = it)
+                                    }
                                 )
 
-                                // Touchscreen mode
-                                SettingsSwitch(
-                                    colors = settingsTileColorsAlt(),
-                                    title = { Text(text = "Touchscreen Mode") },
-                                    state = config.touchscreenMode,
-                                    onCheckedChange = { config = config.copy(touchscreenMode = it) }
-                                )
-
-                                // Emulate keyboard and mouse
-                                SettingsSwitch(
-                                    colors = settingsTileColorsAlt(),
-                                    title = { Text(text = "Emulate keyboard and mouse") },
-                                    subtitle = { Text(text = "Left stick = WASD, Right stick = mouse. L2 = left click, R2 = right click.") },
-                                    state = config.emulateKeyboardMouse,
-                                    onCheckedChange = { checked ->
-                                        // Initialize defaults on first enable if empty
-                                        var newBindings = config.controllerEmulationBindings
-                                        if (checked && newBindings.isEmpty()) {
-                                            newBindings = """
-                                            {"L2":"MOUSE_LEFT_BUTTON","R2":"MOUSE_RIGHT_BUTTON","A":"KEY_SPACE","B":"KEY_Q","X":"KEY_E","Y":"KEY_TAB","SELECT":"KEY_ESC","L1":"KEY_SHIFT_L","L3":"NONE","R1":"KEY_CTRL_R","R3":"NONE","DPAD_UP":"KEY_UP","DPAD_DOWN":"KEY_DOWN","DPAD_LEFT":"KEY_LEFT","DPAD_RIGHT":"KEY_RIGHT","START":"KEY_ENTER"}
-                                        """.trimIndent()
+                                // Show profile editor dialog if requested
+                                showProfileEditor?.let { profileToEdit ->
+                                    app.gamenative.ui.component.dialog.UnifiedProfileEditorDialog(
+                                        profile = profileToEdit,
+                                        initialTab = 0,
+                                        onDismiss = { showProfileEditor = null },
+                                        onSave = {
+                                            showProfileEditor = null
+                                            // Refresh config to pick up any profile changes
                                         }
-                                        config = config.copy(emulateKeyboardMouse = checked, controllerEmulationBindings = newBindings)
-                                    }
-                                )
-
-                                if (config.emulateKeyboardMouse) {
-                                    // Dropdowns for mapping buttons -> bindings
-                                    val buttonOrder = listOf(
-                                        "A", "B", "X", "Y", "L1", "L2", "L3", "R1", "R2", "R3",
-                                        "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT", "START", "SELECT"
                                     )
-                                    val context = LocalContext.current
-                                    val currentMap = try {
-                                        org.json.JSONObject(config.controllerEmulationBindings)
-                                    } catch (_: Exception) {
-                                        org.json.JSONObject()
-                                    }
-                                    val bindingLabels = com.winlator.inputcontrols.Binding.keyboardBindingLabels().toList() +
-                                            com.winlator.inputcontrols.Binding.mouseBindingLabels().toList()
-                                    val bindingValues =
-                                        com.winlator.inputcontrols.Binding.keyboardBindingValues().map { it.name }.toList() +
-                                                com.winlator.inputcontrols.Binding.mouseBindingValues().map { it.name }.toList()
-
-                                    for (btn in buttonOrder) {
-                                        val currentName = currentMap.optString(btn, "NONE")
-                                        val currentIndex = bindingValues.indexOf(currentName).coerceAtLeast(0)
-                                        SettingsListDropdown(
-                                            colors = settingsTileColors(),
-                                            title = { Text(text = btn.replace('_', ' ')) },
-                                            value = currentIndex,
-                                            items = bindingLabels,
-                                            onItemSelected = { idx ->
-                                                try {
-                                                    currentMap.put(btn, bindingValues[idx])
-                                                    config = config.copy(controllerEmulationBindings = currentMap.toString())
-                                                } catch (_: Exception) {
-                                                }
-                                            }
-                                        )
-                                    }
                                 }
                             }
                             if (selectedTab == 4) SettingsGroup() {

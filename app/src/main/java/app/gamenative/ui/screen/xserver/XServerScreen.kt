@@ -2,9 +2,12 @@ package app.gamenative.ui.screen.xserver
 
 import android.app.Activity
 import android.content.Context
+import android.hardware.input.InputManager
 import android.os.Build
 import android.util.Log
+import android.view.InputDevice
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
@@ -36,6 +39,8 @@ import app.gamenative.data.SteamApp
 import app.gamenative.events.AndroidEvent
 import app.gamenative.events.SteamEvent
 import app.gamenative.service.SteamService
+import app.gamenative.ui.component.dialog.InGameProfileManagerDialog
+import app.gamenative.ui.component.dialog.UnifiedProfileEditorDialog
 import app.gamenative.ui.data.XServerState
 import app.gamenative.utils.ContainerUtils
 import com.posthog.PostHog
@@ -205,9 +210,122 @@ fun XServerScreen(
     var win32AppWorkarounds: Win32AppWorkarounds? by remember { mutableStateOf(null) }
 
     var isKeyboardVisible = false
-    var areControlsVisible = false
+    var areControlsVisible by remember { mutableStateOf(false) }
+
+    // Dialog state for in-game controller management
+    var showProfileEditor by remember { mutableStateOf(false) }
+    var showProfileManager by remember { mutableStateOf(false) }
+    var profileEditorInitialTab by remember { mutableStateOf(0) }
+    var currentActiveProfile by remember { mutableStateOf<ControlsProfile?>(null) }
 
     val emulateKeyboardMouse = ContainerUtils.getContainer(context, appId).isEmulateKeyboardMouse()
+
+    // Helper function to detect if a physical controller is connected
+    fun isPhysicalControllerConnected(): Boolean {
+        val inputManager = context.getSystemService(Context.INPUT_SERVICE) as InputManager
+        val deviceIds = inputManager.inputDeviceIds
+
+        for (deviceId in deviceIds) {
+            val device = inputManager.getInputDevice(deviceId)
+            if (device != null) {
+                val sources = device.sources
+                // Check if device is a gamepad or joystick
+                if ((sources and InputDevice.SOURCE_GAMEPAD == InputDevice.SOURCE_GAMEPAD) ||
+                    (sources and InputDevice.SOURCE_JOYSTICK == InputDevice.SOURCE_JOYSTICK)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    // Helper function to refresh and apply a new profile
+    fun applyNewProfile(profile: ControlsProfile) {
+        try {
+            val container = ContainerUtils.getContainer(context, appId)
+            val winHandler = xServerView?.getxServer()?.winHandler
+
+            if (winHandler == null) {
+                Timber.w("Cannot apply profile: winHandler is null")
+                return
+            }
+
+            Timber.d("Applying profile: ${profile.name} (id=${profile.id})")
+
+            // Get a fresh profile instance from the manager to avoid stale data
+            val manager = InputControlsManager(context)
+            val freshProfile = manager.getProfile(profile.id)
+
+            if (freshProfile == null) {
+                Timber.e("Failed to reload profile ${profile.id}")
+                return
+            }
+
+            // Always reload elements from disk to get latest changes
+            PluviaApp.inputControlsView?.let { icView ->
+                freshProfile.loadElements(icView)
+                Timber.d("Loaded ${freshProfile.getElements().size} elements for profile ${freshProfile.name}")
+
+                // Set the profile
+                icView.setProfile(freshProfile)
+                icView.setShowTouchscreenControls(true)
+                icView.visibility = View.VISIBLE
+
+                // Re-link touchpad view to ensure mouse input continues working
+                icView.setTouchpadView(PluviaApp.touchpadView)
+
+                // Ensure touch handling properties are enabled
+                icView.isClickable = true
+                icView.isFocusable = true
+                icView.isFocusableInTouchMode = true
+
+                // Critical z-order fix: Bring InputControlsView to front to receive touch events
+                // IMPORTANT: DO NOT reorder XServerView (SurfaceView) - it destroys the rendering surface!
+                // Using bringToFront() is safe and doesn't destroy surfaces
+                val icParent = icView.parent as? ViewGroup
+
+                icParent?.let { parent ->
+                    // Simply bring InputControlsView to the front (on top of everything)
+                    // This is safe and doesn't destroy any surfaces
+                    icView.bringToFront()
+
+                    // Request layout to apply changes
+                    parent.requestLayout()
+                    parent.invalidate()
+                }
+
+                icView.requestLayout()
+                icView.invalidate()
+
+                // CRITICAL: Force parent to allow touch event dispatch
+                icParent?.let { parent ->
+                    parent.isMotionEventSplittingEnabled = true
+                    parent.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
+                    parent.requestDisallowInterceptTouchEvent(false)
+                }
+
+                // Request focus after layout updates
+                icView.post {
+                    icView.requestFocus()
+                }
+            }
+
+            // Apply touchpad settings from profile
+            PluviaApp.touchpadView?.setSensitivity(freshProfile.getCursorSpeed() * 1.0f)
+            PluviaApp.touchpadView?.setPointerButtonLeftEnabled(freshProfile.isEnableTapToClick)
+            PluviaApp.touchpadView?.setPointerButtonRightEnabled(freshProfile.isEnableTwoFingerRightClick)
+            PluviaApp.touchpadView?.setTouchscreenMouseDisabled(freshProfile.isDisableTouchpadMouse)
+            PluviaApp.touchpadView?.setTouchscreenMode(freshProfile.isTouchscreenMode)
+
+            // Update state
+            areControlsVisible = true
+            currentActiveProfile = freshProfile
+
+            Timber.d("Successfully applied profile: ${freshProfile.name}")
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to apply new profile")
+        }
+    }
 
     val gameBack: () -> Unit = gameBack@{
         val imeVisible = ViewCompat.getRootWindowInsets(view)
@@ -267,11 +385,39 @@ fun XServerScreen(
                                     } else {
                                         profiles[2]
                                     }
-                                    showInputControls(targetProfile, xServerView!!.getxServer().winHandler, container)
+                                    showInputControls(targetProfile, xServerView!!.getxServer().winHandler, container, context)
                                 }
                             }
                             areControlsVisible = !areControlsVisible
-                            Timber.d("Controls visibility toggled to: $areControlsVisible")
+                        }
+
+                        NavigationDialog.ACTION_EDIT_CONTROLS -> {
+                            PostHog.capture(event = "edit_controls_in_game")
+
+                            // Get current active profile
+                            val activeProfile = currentActiveProfile ?: run {
+                                // Try to determine from current controls if available
+                                val profiles = PluviaApp.inputControlsManager?.getProfiles(false) ?: listOf()
+                                if (profiles.isNotEmpty()) profiles[0] else null
+                            }
+
+                            if (activeProfile != null) {
+                                // Detect if physical controller is connected
+                                val hasPhysicalController = isPhysicalControllerConnected()
+
+                                // Set initial tab: 0 = Touch Controls, 1 = Physical Controller
+                                profileEditorInitialTab = if (hasPhysicalController) 1 else 0
+
+                                // Open the unified profile editor dialog
+                                showProfileEditor = true
+                            } else {
+                                Timber.w("No active profile to edit")
+                            }
+                        }
+
+                        NavigationDialog.ACTION_MANAGE_PROFILES -> {
+                            PostHog.capture(event = "manage_profiles_in_game")
+                            showProfileManager = true
                         }
 
                         NavigationDialog.ACTION_EXIT_GAME -> {
@@ -290,6 +436,7 @@ fun XServerScreen(
                     }
                 }
             },
+            areControlsVisible
         ).show()
     }
 
@@ -625,19 +772,23 @@ fun XServerScreen(
                 setXServer(xServerView.getxServer())
                 setTouchpadView(PluviaApp.touchpadView)
 
-                // Load default profile for now; may be overridden by container settings below
+                // Load profile from container settings
                 val profiles = PluviaApp.inputControlsManager?.getProfiles(false) ?: listOf()
                 PrefManager.init(context)
                 if (profiles.isNotEmpty()) {
                     val container = ContainerUtils.getContainer(context, appId)
                     val targetProfile = if (container.isEmulateKeyboardMouse()) {
+                        // Use emulation profile for keyboard/mouse emulation mode
                         val profileName = container.id.toString()
                         profiles.firstOrNull { it.name == profileName }
                             ?: ContainerUtils.generateOrUpdateEmulationProfile(context, container)
                     } else {
-                        profiles[2]
+                        // Use the container's selected controlsProfileId
+                        profiles.firstOrNull { it.id == container.controlsProfileId } ?: profiles.getOrNull(2)
                     }
-                    setProfile(targetProfile)
+                    if (targetProfile != null) {
+                        setProfile(targetProfile)
+                    }
                 }
 
                 // Set overlay opacity from preferences if needed
@@ -664,12 +815,15 @@ fun XServerScreen(
                 PluviaApp.inputControlsView?.setProfile(target)
                 PluviaApp.inputControlsView?.invalidate()
             } else {
-                // Show on-screen controls if no physical controller is connected (respect current profile)
+                // Show on-screen controls if no physical controller is connected (using container's profile)
                 if (ExternalController.getController(0) == null) {
                     val profiles2 = PluviaApp.inputControlsManager?.getProfiles(false) ?: listOf()
-                    if (profiles2.size > 2) {
-                        showInputControls(profiles2[2], xServerView.getxServer().winHandler, container)
+                    val selectedProfile = profiles2.firstOrNull { it.id == container.controlsProfileId }
+                        ?: profiles2.getOrNull(2)
+                    if (selectedProfile != null) {
+                        showInputControls(selectedProfile, xServerView.getxServer().winHandler, container, context)
                         areControlsVisible = true
+                        currentActiveProfile = selectedProfile
                     }
                 }
             }
@@ -715,6 +869,54 @@ fun XServerScreen(
     //
     //     }
     // }
+
+    // In-game profile editor dialog
+    if (showProfileEditor && currentActiveProfile != null) {
+        val containerForEditor = ContainerUtils.getContainer(context, appId)
+        UnifiedProfileEditorDialog(
+            profile = currentActiveProfile!!,
+            initialTab = profileEditorInitialTab,
+            container = containerForEditor, // Pass container to detect in-game context
+            onDismiss = {
+                showProfileEditor = false
+                // Ensure controls remain visible after dismissing
+                if (!areControlsVisible && currentActiveProfile != null) {
+                    val container = ContainerUtils.getContainer(context, appId)
+                    val winHandler = xServerView?.getxServer()?.winHandler
+                    if (winHandler != null) {
+                        showInputControls(currentActiveProfile!!, winHandler, container, context)
+                        areControlsVisible = true
+                    }
+                }
+            },
+            onSave = {
+                // Profile is automatically saved in the dialog
+                // Refresh the controls with the updated profile
+                currentActiveProfile?.let { profile ->
+                    applyNewProfile(profile)
+                }
+                showProfileEditor = false
+            }
+        )
+    }
+
+    // In-game profile manager dialog
+    if (showProfileManager) {
+        val container = ContainerUtils.getContainer(context, appId)
+        InGameProfileManagerDialog(
+            context = context,
+            container = container,
+            currentProfileId = currentActiveProfile?.id,
+            onProfileSelected = { profile ->
+                // Apply the selected/created profile immediately
+                applyNewProfile(profile)
+                // CRITICAL: Restore controls visibility after profile switch
+                areControlsVisible = true
+                showProfileManager = false
+            },
+            onDismiss = { showProfileManager = false }
+        )
+    }
 }
 
 private fun emulateKeyboardMouseOnscreen(
@@ -797,14 +999,22 @@ private fun emulateKeyboardMouseOnscreen(
     return targetProfile
 }
 
-private fun showInputControls(profile: ControlsProfile, winHandler: WinHandler, container: Container) {
+private fun showInputControls(profile: ControlsProfile, winHandler: WinHandler, container: Container, context: Context) {
+    // Migrate legacy mouse/touch settings from container to profile if needed
+    ContainerUtils.migrateMouseTouchSettingsToProfile(context, container)
+
     profile.setVirtualGamepad(true)
     PluviaApp.inputControlsView?.setVisibility(View.VISIBLE)
     PluviaApp.inputControlsView?.requestFocus()
     PluviaApp.inputControlsView?.setProfile(profile)
 
     PluviaApp.touchpadView?.setSensitivity(profile.getCursorSpeed() * 1.0f)
-    PluviaApp.touchpadView?.setPointerButtonRightEnabled(false)
+    // Apply touchpad gesture settings from profile
+    PluviaApp.touchpadView?.setPointerButtonLeftEnabled(profile.isEnableTapToClick)
+    PluviaApp.touchpadView?.setPointerButtonRightEnabled(profile.isEnableTwoFingerRightClick)
+    // Apply mouse and touch behavior settings from profile
+    PluviaApp.touchpadView?.setTouchscreenMouseDisabled(profile.isDisableTouchpadMouse)
+    PluviaApp.touchpadView?.setTouchscreenMode(profile.isTouchscreenMode)
 
     PluviaApp.inputControlsView?.invalidate()
 

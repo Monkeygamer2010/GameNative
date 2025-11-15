@@ -91,7 +91,10 @@
     <string name="exit">Exit Game</string>
     <string name="keyboard">Keyboard</string>
     <string name="input_controls">On-screen Controller</string>
+    <string name="edit_controls">Edit Controls</string>
+    <string name="manage_profiles">Manage Profiles</string>
     <string name="touchpad_help">Touchpad Help</string>
+    <string name="change_profile">Change Profile</string>
 
 
     <string name="box86_64_env_var_help__dynarec_safeflags"><![CDATA[

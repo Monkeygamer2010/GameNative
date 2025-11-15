@@ -1,6 +1,6 @@
 {
-  "id": 3,
-  "name": "Virtual Gamepad",
+  "id": 7,
+  "name": "Default Virtual Gamepad",
   "cursorSpeed": 1,
   "physicalStickDeadZone": 0.15,
   "physicalStickSensitivity": 3.0,

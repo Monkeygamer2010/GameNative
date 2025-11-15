@@ -207,6 +207,10 @@ public class InputControlsView extends View {
 
     public synchronized void setProfile(ControlsProfile profile) {
         if (profile != null) {
+            // If switching to a different profile, force reload from disk
+            if (this.profile != profile && profile.isElementsLoaded()) {
+                profile.reloadElements(this);
+            }
             this.profile = profile;
             deselectAllElements();
         }
@@ -295,13 +299,16 @@ public class InputControlsView extends View {
         }
     }
 
-    private void processJoystickInput(ExternalController controller) {
+    private void processJoystickInput(ExternalController controller, float stickDeadZone, float dpadDeadZone) {
         ExternalControllerBinding controllerBinding;
         final int[] axes = {MotionEvent.AXIS_X, MotionEvent.AXIS_Y, MotionEvent.AXIS_Z, MotionEvent.AXIS_RZ, MotionEvent.AXIS_HAT_X, MotionEvent.AXIS_HAT_Y};
         final float[] values = {controller.state.thumbLX, controller.state.thumbLY, controller.state.thumbRX, controller.state.thumbRY, controller.state.getDPadX(), controller.state.getDPadY()};
 
         for (byte i = 0; i < axes.length; i++) {
-            if (Math.abs(values[i]) > ControlElement.STICK_DEAD_ZONE) {
+            // Use appropriate dead zone based on axis type (d-pad vs stick)
+            float deadZone = (axes[i] == MotionEvent.AXIS_HAT_X || axes[i] == MotionEvent.AXIS_HAT_Y) ? dpadDeadZone : stickDeadZone;
+
+            if (Math.abs(values[i]) > deadZone) {
                 controllerBinding = controller.getControllerBinding(ExternalControllerBinding.getKeyCodeForAxis(axes[i], Mathf.sign(values[i])));
                 if (controllerBinding != null) handleInputEvent(controllerBinding.getBinding(), true, values[i]);
             }
@@ -318,16 +325,22 @@ public class InputControlsView extends View {
     public boolean onGenericMotionEvent(MotionEvent event) {
         if (!editMode && profile != null) {
             ExternalController controller = profile.getController(event.getDeviceId());
-            if (controller != null && controller.updateStateFromMotionEvent(event)) {
-                ExternalControllerBinding controllerBinding;
-                controllerBinding = controller.getControllerBinding(KeyEvent.KEYCODE_BUTTON_L2);
-                if (controllerBinding != null) handleInputEvent(controllerBinding.getBinding(), controller.state.isPressed(ExternalController.IDX_BUTTON_L2));
+            if (controller != null) {
+                float stickDeadZone = profile.getPhysicalStickDeadZone();
+                float stickSensitivity = profile.getPhysicalStickSensitivity();
+                float dpadDeadZone = profile.getPhysicalDpadDeadZone();
 
-                controllerBinding = controller.getControllerBinding(KeyEvent.KEYCODE_BUTTON_R2);
-                if (controllerBinding != null) handleInputEvent(controllerBinding.getBinding(), controller.state.isPressed(ExternalController.IDX_BUTTON_R2));
+                if (controller.updateStateFromMotionEvent(event, stickDeadZone, stickSensitivity)) {
+                    ExternalControllerBinding controllerBinding;
+                    controllerBinding = controller.getControllerBinding(KeyEvent.KEYCODE_BUTTON_L2);
+                    if (controllerBinding != null) handleInputEvent(controllerBinding.getBinding(), controller.state.isPressed(ExternalController.IDX_BUTTON_L2));
 
-                processJoystickInput(controller);
-                return true;
+                    controllerBinding = controller.getControllerBinding(KeyEvent.KEYCODE_BUTTON_R2);
+                    if (controllerBinding != null) handleInputEvent(controllerBinding.getBinding(), controller.state.isPressed(ExternalController.IDX_BUTTON_R2));
+
+                    processJoystickInput(controller, stickDeadZone, dpadDeadZone);
+                    return true;
+                }
             }
         }
         return super.onGenericMotionEvent(event);

@@ -707,7 +707,11 @@ public class WinHandler {
                 Timber.d("WinHandler.onGenericMotionEvent: adopted controller %s(#%d)", adopted.getName(), adopted.getDeviceId());
             }
         }
-        if (externalController != null && externalController.getDeviceId() == event.getDeviceId() && (handled = this.currentController.updateStateFromMotionEvent(event))) {
+        if (externalController != null && externalController.getDeviceId() == event.getDeviceId()) {
+            ControlsProfile profile = inputControlsView != null ? inputControlsView.getProfile() : null;
+            float stickDeadZone = profile != null ? profile.getPhysicalStickDeadZone() : ExternalController.STICK_DEAD_ZONE;
+            float stickSensitivity = profile != null ? profile.getPhysicalStickSensitivity() : ExternalController.STICK_SENSITIVITY;
+            handled = this.currentController.updateStateFromMotionEvent(event, stickDeadZone, stickSensitivity);
             if (handled) {
                 sendGamepadState();
                 sendMemoryFileState();
@@ -737,10 +741,12 @@ public class WinHandler {
 
         if (externalController != null && externalController.getDeviceId() == event.getDeviceId() && event.getRepeatCount() == 0) {
             int action = event.getAction();
+            ControlsProfile profile = inputControlsView != null ? inputControlsView.getProfile() : null;
+            float stickDeadZone = profile != null ? profile.getPhysicalStickDeadZone() : ExternalController.STICK_DEAD_ZONE;
             if (action == KeyEvent.ACTION_DOWN) {
-                handled = this.currentController.updateStateFromKeyEvent(event);
+                handled = this.currentController.updateStateFromKeyEvent(event, stickDeadZone);
             } else if (action == KeyEvent.ACTION_UP) {
-                handled = this.currentController.updateStateFromKeyEvent(event);
+                handled = this.currentController.updateStateFromKeyEvent(event, stickDeadZone);
             }
             sendMemoryFileState(this.currentController, buffer);
             if (handled) {

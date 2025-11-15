@@ -25,12 +25,18 @@ public class NavigationDialog extends ContentDialog {
     public static final int ACTION_KEYBOARD = 1;
     public static final int ACTION_INPUT_CONTROLS = 2;
     public static final int ACTION_EXIT_GAME = 3;
+    public static final int ACTION_EDIT_CONTROLS = 4;
+    public static final int ACTION_MANAGE_PROFILES = 5;
 
     public interface NavigationListener {
         void onNavigationItemSelected(int itemId);
     }
 
     public NavigationDialog(@NonNull Context context, NavigationListener listener) {
+        this(context, listener, true);
+    }
+
+    public NavigationDialog(@NonNull Context context, NavigationListener listener, boolean controlsEnabled) {
         super(context, R.layout.navigation_dialog);
         if (getWindow() != null) {
             getWindow().setBackgroundDrawableResource(R.drawable.navigation_dialog_background);
@@ -48,11 +54,19 @@ public class NavigationDialog extends ContentDialog {
         }
 
         addMenuItem(context, grid, R.drawable.icon_keyboard, R.string.keyboard, ACTION_KEYBOARD, listener);
-        addMenuItem(context, grid, R.drawable.icon_input_controls, R.string.input_controls, ACTION_INPUT_CONTROLS, listener);
+        // Use different icon and opacity for toggle based on controls state
+        int controlsIcon = R.drawable.icon_input_controls;
+        addMenuItem(context, grid, controlsIcon, R.string.input_controls, ACTION_INPUT_CONTROLS, listener, controlsEnabled);
+        addMenuItem(context, grid, R.drawable.icon_popup_menu_edit, R.string.edit_controls, ACTION_EDIT_CONTROLS, listener);
+        addMenuItem(context, grid, R.drawable.icon_gamepad, R.string.manage_profiles, ACTION_MANAGE_PROFILES, listener);
         addMenuItem(context, grid, R.drawable.icon_exit, R.string.exit_game, ACTION_EXIT_GAME, listener);
     }
 
     private void addMenuItem(Context context, GridLayout grid, int iconRes, int titleRes, int itemId, NavigationListener listener) {
+        addMenuItem(context, grid, iconRes, titleRes, itemId, listener, true);
+    }
+
+    private void addMenuItem(Context context, GridLayout grid, int iconRes, int titleRes, int itemId, NavigationListener listener, boolean enabled) {
         int padding = dpToPx(5, context);
         LinearLayout layout = new LinearLayout(context);
         layout.setPadding(padding, padding, padding, padding);
@@ -66,7 +80,12 @@ public class NavigationDialog extends ContentDialog {
         View icon = new View(context);
         icon.setBackground(AppCompatResources.getDrawable(context, iconRes));
         if (icon.getBackground() != null) {
-            icon.getBackground().setTint(context.getColor(R.color.navigation_dialog_item_color));
+            int color = context.getColor(R.color.navigation_dialog_item_color);
+            // If disabled, apply alpha to make it look crossed out / faded
+            if (!enabled) {
+                icon.setAlpha(0.4f);
+            }
+            icon.getBackground().setTint(color);
         }
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(size, size);
         lp.gravity = Gravity.CENTER_HORIZONTAL;
@@ -80,6 +99,9 @@ public class NavigationDialog extends ContentDialog {
         text.setGravity(Gravity.CENTER);
         text.setLines(2);
         text.setTextColor(context.getColor(R.color.navigation_dialog_item_color));
+        if (!enabled) {
+            text.setAlpha(0.4f);
+        }
         Typeface tf = ResourcesCompat.getFont(context, R.font.bricolage_grotesque_regular);
         if (tf != null) {
             text.setTypeface(tf);

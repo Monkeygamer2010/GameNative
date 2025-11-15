@@ -182,6 +182,8 @@ public class ControlElement {
             boundingBoxNeedsUpdate = true;
         }
         bindings[index] = binding;
+        // Mark bounding box for update since text may have changed
+        boundingBoxNeedsUpdate = true;
     }
 
     public void setBinding(Binding binding) {
@@ -650,13 +652,19 @@ public class ControlElement {
                 if (currentPosition == null) currentPosition = new PointF();
                 currentPosition.x = boundingBox.left + deltaX * radius + radius;
                 currentPosition.y = boundingBox.top + deltaY * radius + radius;
-                final boolean[] states = {deltaY <= -STICK_DEAD_ZONE, deltaX >= STICK_DEAD_ZONE, deltaY >= STICK_DEAD_ZONE, deltaX <= -STICK_DEAD_ZONE};
+
+                // Get dead zone and sensitivity from profile
+                ControlsProfile profile = inputControlsView.getProfile();
+                float stickDeadZone = profile != null ? profile.getVirtualStickDeadZone() : STICK_DEAD_ZONE;
+                float stickSensitivity = profile != null ? profile.getVirtualStickSensitivity() : STICK_SENSITIVITY;
+
+                final boolean[] states = {deltaY <= -stickDeadZone, deltaX >= stickDeadZone, deltaY >= stickDeadZone, deltaX <= -stickDeadZone};
 
                 for (byte i = 0; i < 4; i++) {
                     float value = i == 1 || i == 3 ? deltaX : deltaY;
                     Binding binding = getBindingAt(i);
                     if (binding.isGamepad()) {
-                        value = Mathf.clamp(Math.max(0, Math.abs(value) - 0.01f) * Mathf.sign(value) * STICK_SENSITIVITY, -1, 1);
+                        value = Mathf.clamp(Math.max(0, Math.abs(value) - 0.01f) * Mathf.sign(value) * stickSensitivity, -1, 1);
                         inputControlsView.handleInputEvent(binding, true, value);
                         this.states[i] = true;
                     }
@@ -703,7 +711,11 @@ public class ControlElement {
                 if (cursorDx != 0 || cursorDy != 0) inputControlsView.getXServer().injectPointerMoveDelta(cursorDx, cursorDy);
             }
             else {
-                final boolean[] states = {deltaY <= -DPAD_DEAD_ZONE, deltaX >= DPAD_DEAD_ZONE, deltaY >= DPAD_DEAD_ZONE, deltaX <= -DPAD_DEAD_ZONE};
+                // Get d-pad dead zone from profile
+                ControlsProfile profile = inputControlsView.getProfile();
+                float dpadDeadZone = profile != null ? profile.getVirtualDpadDeadZone() : DPAD_DEAD_ZONE;
+
+                final boolean[] states = {deltaY <= -dpadDeadZone, deltaX >= dpadDeadZone, deltaY >= dpadDeadZone, deltaX <= -dpadDeadZone};
 
                 for (byte i = 0; i < 4; i++) {
                     float value = i == 1 || i == 3 ? deltaX : deltaY;

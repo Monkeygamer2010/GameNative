@@ -92,6 +92,7 @@ import com.google.android.play.core.splitcompat.SplitCompat
 import com.skydoves.landscapist.ImageOptions
 import com.skydoves.landscapist.coil.CoilImage
 import app.gamenative.utils.SteamUtils
+import com.winlator.container.Container
 import com.winlator.container.ContainerData
 import com.winlator.xenvironment.ImageFsInstaller
 import com.winlator.fexcore.FEXCoreManager
@@ -220,8 +221,13 @@ fun AppScreen(
         mutableStateOf(ContainerData())
     }
 
+    var currentContainer by remember(appId) {
+        mutableStateOf<Container?>(null)
+    }
+
     val showEditConfigDialog: () -> Unit = {
         val container = ContainerUtils.getOrCreateContainer(context, appId)
+        currentContainer = container
         containerData = ContainerUtils.toContainerData(container)
         // Seed FEXCore UI fields from actual per-container config file so values show up when editing
         try {
@@ -586,6 +592,7 @@ fun AppScreen(
         visible = showConfigDialog,
         title = "${appInfo.name} Config",
         initialConfig = containerData,
+        container = currentContainer,
         onDismissRequest = { showConfigDialog = false },
         onSave = {
             showConfigDialog = false

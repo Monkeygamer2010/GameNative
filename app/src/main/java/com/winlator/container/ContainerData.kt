@@ -76,6 +76,10 @@ data class ContainerData(
     /** Button->Binding name map (JSON string) for emulation UI persistence **/
     val controllerEmulationBindings: String = "",
     val forceDlc: Boolean = false,
+    /** Controls profile ID for on-screen controls and physical controller bindings **/
+    val controlsProfileId: Int = 3,
+    /** Auto-hide on-screen controls when physical controller is connected **/
+    val autoHideControls: Boolean = false,
 ) {
     companion object {
         val Saver = mapSaver(
@@ -126,6 +130,8 @@ data class ContainerData(
                     "emulateKeyboardMouse" to state.emulateKeyboardMouse,
                     "controllerEmulationBindings" to state.controllerEmulationBindings,
                     "forceDlc" to state.forceDlc,
+                    "controlsProfileId" to state.controlsProfileId,
+                    "autoHideControls" to state.autoHideControls,
                 )
             },
             restore = { savedMap ->
@@ -175,6 +181,8 @@ data class ContainerData(
                     emulateKeyboardMouse = (savedMap["emulateKeyboardMouse"] as? Boolean) ?: false,
                     controllerEmulationBindings = (savedMap["controllerEmulationBindings"] as? String) ?: "",
                     forceDlc = (savedMap["forceDlc"] as? Boolean) ?: false,
+                    controlsProfileId = (savedMap["controlsProfileId"] as? Int) ?: 3,
+                    autoHideControls = (savedMap["autoHideControls"] as? Boolean) ?: false,
                 )
             },
         )

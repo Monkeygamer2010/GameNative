@@ -19,10 +19,9 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.util.ArrayList;
-
 public class ExternalController {
     public static final float STICK_DEAD_ZONE = 0.15f;
+    public static final float STICK_SENSITIVITY = 3.0f;
     public static final byte IDX_BUTTON_A = 0;
     public static final byte IDX_BUTTON_B = 1;
     public static final byte IDX_BUTTON_X = 2;
@@ -144,6 +143,10 @@ public class ExternalController {
         return this.controllerBindings.size();
     }
 
+    public ArrayList<ExternalControllerBinding> getControllerBindings() {
+        return this.controllerBindings;
+    }
+
     public JSONObject toJSONObject() {
         try {
             if (this.controllerBindings.isEmpty()) {
@@ -174,24 +177,25 @@ public class ExternalController {
         return getDeviceId() + " | " + getName();
     }
 
-    private void processJoystickInput(MotionEvent event, int historyPos) {
+    private void processJoystickInput(MotionEvent event, int historyPos, float stickDeadZone, float stickSensitivity) {
         boolean z = false;
-        this.state.thumbLX = getCenteredAxis(event, MotionEvent.AXIS_X, historyPos);
-        this.state.thumbLY = getCenteredAxis(event, MotionEvent.AXIS_Y, historyPos);
-        this.state.thumbRX = getCenteredAxis(event, MotionEvent.AXIS_Z, historyPos);
-        this.state.thumbRY = getCenteredAxis(event, MotionEvent.AXIS_RZ, historyPos);
+        // Apply sensitivity multiplier and clamp to [-1, 1]
+        this.state.thumbLX = Math.max(-1f, Math.min(1f, getCenteredAxis(event, MotionEvent.AXIS_X, historyPos) * stickSensitivity));
+        this.state.thumbLY = Math.max(-1f, Math.min(1f, getCenteredAxis(event, MotionEvent.AXIS_Y, historyPos) * stickSensitivity));
+        this.state.thumbRX = Math.max(-1f, Math.min(1f, getCenteredAxis(event, MotionEvent.AXIS_Z, historyPos) * stickSensitivity));
+        this.state.thumbRY = Math.max(-1f, Math.min(1f, getCenteredAxis(event, MotionEvent.AXIS_RZ, historyPos) * stickSensitivity));
         if (historyPos == -1) {
             float axisX = getCenteredAxis(event, MotionEvent.AXIS_HAT_X, historyPos);
             float axisY = getCenteredAxis(event, MotionEvent.AXIS_HAT_Y, historyPos);
             GamepadState gamepadState = this.state;
-            gamepadState.dpad[0] = axisY == -1.0f && Math.abs(gamepadState.thumbLY) < STICK_DEAD_ZONE;
+            gamepadState.dpad[0] = axisY == -1.0f && Math.abs(gamepadState.thumbLY) < stickDeadZone;
             GamepadState gamepadState2 = this.state;
-            gamepadState2.dpad[1] = axisX == 1.0f && Math.abs(gamepadState2.thumbLX) < STICK_DEAD_ZONE;
+            gamepadState2.dpad[1] = axisX == 1.0f && Math.abs(gamepadState2.thumbLX) < stickDeadZone;
             GamepadState gamepadState3 = this.state;
-            gamepadState3.dpad[2] = axisY == 1.0f && Math.abs(gamepadState3.thumbLY) < STICK_DEAD_ZONE;
+            gamepadState3.dpad[2] = axisY == 1.0f && Math.abs(gamepadState3.thumbLY) < stickDeadZone;
             GamepadState gamepadState4 = this.state;
             boolean[] zArr = gamepadState4.dpad;
-            if (axisX == -1.0f && Math.abs(gamepadState4.thumbLX) < STICK_DEAD_ZONE) {
+            if (axisX == -1.0f && Math.abs(gamepadState4.thumbLX) < stickDeadZone) {
                 z = true;
             }
             zArr[3] = z;
@@ -244,20 +248,32 @@ public class ExternalController {
     }
 
     public boolean updateStateFromMotionEvent(MotionEvent event) {
+        return updateStateFromMotionEvent(event, STICK_DEAD_ZONE);
+    }
+
+    public boolean updateStateFromMotionEvent(MotionEvent event, float stickDeadZone) {
+        return updateStateFromMotionEvent(event, stickDeadZone, STICK_SENSITIVITY);
+    }
+
+    public boolean updateStateFromMotionEvent(MotionEvent event, float stickDeadZone, float stickSensitivity) {
         if (isJoystickDevice(event)) {
             if (triggerType == TRIGGER_IS_AXIS)
                 processTriggerButton(event);
             else if (triggerType == TRIGGER_IS_BUTTON && isXboxController())
                 processXboxTriggerButton(event);
             int historySize = event.getHistorySize();
-            for (int i = 0; i < historySize; i++) processJoystickInput(event, i);
-            processJoystickInput(event, -1);
+            for (int i = 0; i < historySize; i++) processJoystickInput(event, i, stickDeadZone, stickSensitivity);
+            processJoystickInput(event, -1, stickDeadZone, stickSensitivity);
             return true;
         }
         return false;
     }
 
     public boolean updateStateFromKeyEvent(KeyEvent event) {
+        return updateStateFromKeyEvent(event, STICK_DEAD_ZONE);
+    }
+
+    public boolean updateStateFromKeyEvent(KeyEvent event, float stickDeadZone) {
         boolean z = false;
         boolean pressed = event.getAction() == KeyEvent.ACTION_DOWN;
         int keyCode = event.getKeyCode();
@@ -282,12 +298,12 @@ public class ExternalController {
         switch (keyCode) {
             case KeyEvent.KEYCODE_DPAD_UP:
                 GamepadState gamepadState = this.state;
-                gamepadState.dpad[0] = pressed && Math.abs(gamepadState.thumbLY) < STICK_DEAD_ZONE;
+                gamepadState.dpad[0] = pressed && Math.abs(gamepadState.thumbLY) < stickDeadZone;
                 return true;
             case KeyEvent.KEYCODE_DPAD_DOWN:
                 GamepadState gamepadState2 = this.state;
                 boolean[] zArr = gamepadState2.dpad;
-                if (pressed && Math.abs(gamepadState2.thumbLY) < STICK_DEAD_ZONE) {
+                if (pressed && Math.abs(gamepadState2.thumbLY) < stickDeadZone) {
                     z = true;
                 }
                 zArr[2] = z;
@@ -295,7 +311,7 @@ public class ExternalController {
             case KeyEvent.KEYCODE_DPAD_LEFT:
                 GamepadState gamepadState3 = this.state;
                 boolean[] zArr2 = gamepadState3.dpad;
-                if (pressed && Math.abs(gamepadState3.thumbLX) < STICK_DEAD_ZONE) {
+                if (pressed && Math.abs(gamepadState3.thumbLX) < stickDeadZone) {
                     z = true;
                 }
                 zArr2[3] = z;
@@ -303,7 +319,7 @@ public class ExternalController {
             case KeyEvent.KEYCODE_DPAD_RIGHT:
                 GamepadState gamepadState4 = this.state;
                 boolean[] zArr3 = gamepadState4.dpad;
-                if (pressed && Math.abs(gamepadState4.thumbLX) < STICK_DEAD_ZONE) {
+                if (pressed && Math.abs(gamepadState4.thumbLX) < stickDeadZone) {
                     z = true;
                 }
                 zArr3[1] = z;

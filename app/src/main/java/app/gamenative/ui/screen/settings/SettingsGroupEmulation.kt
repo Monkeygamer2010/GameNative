@@ -9,6 +9,7 @@ import androidx.compose.runtime.setValue
 import app.gamenative.ui.component.dialog.Box64PresetsDialog
 import app.gamenative.ui.component.dialog.ContainerConfigDialog
 import app.gamenative.ui.component.dialog.OrientationDialog
+import app.gamenative.ui.screen.settings.ControlsEditorDialog
 import app.gamenative.ui.theme.settingsTileColors
 import app.gamenative.utils.ContainerUtils
 import com.alorma.compose.settings.ui.SettingsGroup
@@ -20,6 +21,7 @@ fun SettingsGroupEmulation() {
         var showConfigDialog by rememberSaveable { mutableStateOf(false) }
         var showOrientationDialog by rememberSaveable { mutableStateOf(false) }
         var showBox64PresetsDialog by rememberSaveable { mutableStateOf(false) }
+        var showControlsEditor by rememberSaveable { mutableStateOf(false) }
 
         OrientationDialog(
             openDialog = showOrientationDialog,
@@ -54,6 +56,19 @@ fun SettingsGroupEmulation() {
             app.gamenative.ui.screen.settings.ContentsManagerDialog(open = showContentsManager, onDismiss = { showContentsManager = false })
         }
 
+        if (showControlsEditor) {
+            ControlsEditorDialog(
+                open = showControlsEditor,
+                onDismiss = { showControlsEditor = false }
+            )
+        }
+
+        SettingsMenuLink(
+            colors = settingsTileColors(),
+            title = { Text(text = "Controller Profiles") },
+            subtitle = { Text(text = "Manage on-screen and physical controller profiles") },
+            onClick = { showControlsEditor = true },
+        )
         SettingsMenuLink(
             colors = settingsTileColors(),
             title = { Text(text = "Allowed Orientations") },

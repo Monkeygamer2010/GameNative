@@ -117,6 +117,10 @@ public class Container {
     private boolean emulateKeyboardMouse = false;
     // Serialized as JSON object: logical button name -> Binding enum name
     private JSONObject controllerEmulationBindings;
+    // Controls profile ID for on-screen controls and physical controller bindings
+    public int controlsProfileId = 3;
+    // Auto-hide on-screen controls when physical controller is connected
+    public boolean autoHideControls = false;
     private boolean gstreamerWorkaround = false;
 
     private boolean forceDlc = false;
@@ -621,6 +625,8 @@ public class Container {
             if (controllerEmulationBindings != null) {
                 data.put("controllerEmulationBindings", controllerEmulationBindings);
             }
+            data.put("controlsProfileId", controlsProfileId);
+            data.put("autoHideControls", autoHideControls);
 
             // Force DLC setting
             data.put("forceDlc", forceDlc);
@@ -783,6 +789,12 @@ public class Container {
                     break;
                 case "controllerEmulationBindings":
                     this.controllerEmulationBindings = data.getJSONObject(key);
+                    break;
+                case "controlsProfileId":
+                    this.controlsProfileId = data.getInt(key);
+                    break;
+                case "autoHideControls":
+                    this.autoHideControls = data.getBoolean(key);
                     break;
                 case "forceDlc":
                     this.forceDlc = data.getBoolean(key);

@@ -1,1 +1,64 @@
-{"id":1,"name":"RTS","cursorSpeed":1,"elements":[{"type":"BUTTON","shape":"SQUARE","bindings":["KEY_DEL","NONE","NONE","NONE"],"scale":1,"x":0.12745098769664764,"y":0.35555556416511536,"toggleSwitch":false,"text":"","iconId":0},{"type":"BUTTON","shape":"SQUARE","bindings":["KEY_DOWN","NONE","NONE","NONE"],"scale":1,"x":0.12745098769664764,"y":0.7555555701255798,"toggleSwitch":false,"text":"","iconId":5},{"type":"BUTTON","shape":"SQUARE","bindings":["KEY_RIGHT","NONE","NONE","NONE"],"scale":1,"x":0.12745098769664764,"y":0.6222222447395325,"toggleSwitch":false,"text":"","iconId":4},{"type":"BUTTON","shape":"SQUARE","bindings":["KEY_LEFT","NONE","NONE","NONE"],"scale":1,"x":0.06862745434045792,"y":0.6222222447395325,"toggleSwitch":false,"text":"","iconId":2},{"type":"BUTTON","shape":"SQUARE","bindings":["KEY_UP","NONE","NONE","NONE"],"scale":1,"x":0.12745098769664764,"y":0.4888888895511627,"toggleSwitch":false,"text":"","iconId":3},{"type":"BUTTON","shape":"SQUARE","bindings":["KEY_ESC","NONE","NONE","NONE"],"scale":1,"x":0.06862745434045792,"y":0.35555556416511536,"toggleSwitch":false,"text":"","iconId":0},{"type":"BUTTON","shape":"SQUARE","bindings":["MOUSE_RIGHT_BUTTON","NONE","NONE","NONE"],"scale":1,"x":0.8721405267715454,"y":0.7555555701255798,"toggleSwitch":false,"text":"","iconId":0},{"type":"BUTTON","shape":"SQUARE","bindings":["KEY_TAB","NONE","NONE","NONE"],"scale":1,"x":0.06862745434045792,"y":0.4888888895511627,"toggleSwitch":false,"text":"","iconId":0},{"type":"BUTTON","shape":"SQUARE","bindings":["KEY_SHIFT_L","NONE","NONE","NONE"],"scale":1,"x":0.06862745434045792,"y":0.7555555701255798,"toggleSwitch":false,"text":"","iconId":0},{"type":"BUTTON","shape":"SQUARE","bindings":["KEY_CTRL_L","NONE","NONE","NONE"],"scale":1,"x":0.06862745434045792,"y":0.8888888955116272,"toggleSwitch":false,"text":"","iconId":0},{"type":"BUTTON","shape":"SQUARE","bindings":["KEY_ALT_L","NONE","NONE","NONE"],"scale":1,"x":0.12745098769664764,"y":0.8888888955116272,"toggleSwitch":false,"text":"","iconId":0},{"type":"RANGE_BUTTON","shape":"CIRCLE","bindings":["NONE","NONE","NONE","NONE","NONE","NONE"],"scale":1,"x":0.1568627506494522,"y":0.08888889104127884,"toggleSwitch":false,"text":"","iconId":0,"range":"FROM_0_TO_9"},{"type":"BUTTON","shape":"SQUARE","bindings":["KEY_SPACE","NONE","NONE","NONE"],"scale":1,"x":0.8721405267715454,"y":0.8888888955116272,"toggleSwitch":false,"text":"","iconId":0},{"type":"BUTTON","shape":"SQUARE","bindings":["KEY_BKSP","NONE","NONE","NONE"],"scale":1,"x":0.9309640526771545,"y":0.7555555701255798,"toggleSwitch":false,"text":"","iconId":0},{"type":"BUTTON","shape":"SQUARE","bindings":["KEY_ENTER","NONE","NONE","NONE"],"scale":1,"x":0.9309640526771545,"y":0.8888888955116272,"toggleSwitch":false,"text":"","iconId":0},{"type":"RANGE_BUTTON","shape":"CIRCLE","bindings":["NONE","NONE","NONE","NONE","NONE","NONE"],"scale":1,"x":0.843137264251709,"y":0.08888889104127884,"toggleSwitch":false,"text":"","iconId":0}]}
+{
+  "id": 1,
+  "name": "FPS/TPS Template",
+  "cursorSpeed": 1,
+  "physicalStickDeadZone": 0.15,
+  "physicalStickSensitivity": 3.0,
+  "physicalDpadDeadZone": 0.15,
+  "virtualStickDeadZone": 0.15,
+  "virtualStickSensitivity": 3.0,
+  "virtualDpadDeadZone": 0.3,
+  "enableTapToClick": true,
+  "enableTwoFingerRightClick": true,
+  "disableTouchpadMouse": false,
+  "touchscreenMode": false,
+  "elements": [
+    {"type":"STICK","shape":"CIRCLE","bindings":["KEY_W","KEY_D","KEY_S","KEY_A"],"scale":1,"x":0.1,"y":0.65,"toggleSwitch":false,"text":"","iconId":0},
+    {"type":"STICK","shape":"CIRCLE","bindings":["MOUSE_MOVE_UP","MOUSE_MOVE_RIGHT","MOUSE_MOVE_DOWN","MOUSE_MOVE_LEFT"],"scale":1,"x":0.78,"y":0.65,"toggleSwitch":false,"text":"","iconId":0},
+    {"type":"BUTTON","shape":"CIRCLE","bindings":["KEY_SPACE","NONE","NONE","NONE"],"scale":1,"x":0.87,"y":0.45,"toggleSwitch":false,"text":"","iconId":0},
+    {"type":"BUTTON","shape":"CIRCLE","bindings":["KEY_CTRL_L","NONE","NONE","NONE"],"scale":1,"x":0.93,"y":0.38,"toggleSwitch":false,"text":"","iconId":0},
+    {"type":"BUTTON","shape":"CIRCLE","bindings":["KEY_R","NONE","NONE","NONE"],"scale":1,"x":0.81,"y":0.38,"toggleSwitch":false,"text":"","iconId":0},
+    {"type":"BUTTON","shape":"CIRCLE","bindings":["KEY_E","NONE","NONE","NONE"],"scale":1,"x":0.87,"y":0.31,"toggleSwitch":false,"text":"","iconId":0},
+    {"type":"BUTTON","shape":"RECT","bindings":["MOUSE_LEFT_BUTTON","NONE","NONE","NONE"],"scale":1,"x":0.97,"y":0.22,"toggleSwitch":false,"text":"","iconId":0},
+    {"type":"BUTTON","shape":"RECT","bindings":["MOUSE_RIGHT_BUTTON","NONE","NONE","NONE"],"scale":2,"x":0.93,"y":0.07,"toggleSwitch":false,"text":"","iconId":0},
+    {"type":"BUTTON","shape":"RECT","bindings":["KEY_G","NONE","NONE","NONE"],"scale":1,"x":0.03,"y":0.22,"toggleSwitch":false,"text":"","iconId":0},
+    {"type":"BUTTON","shape":"RECT","bindings":["KEY_F","NONE","NONE","NONE"],"scale":2,"x":0.07,"y":0.07,"toggleSwitch":false,"text":"","iconId":0},
+    {"type":"D_PAD","shape":"CIRCLE","bindings":["KEY_1","KEY_2","KEY_3","KEY_4"],"scale":0.85,"x":0.11,"y":0.38,"toggleSwitch":false,"text":"","iconId":0},
+    {"type":"BUTTON","shape":"ROUND_RECT","bindings":["KEY_ESC","NONE","NONE","NONE"],"scale":0.85,"x":0.46,"y":0.91,"toggleSwitch":false,"text":"","iconId":16},
+    {"type":"BUTTON","shape":"ROUND_RECT","bindings":["KEY_TAB","NONE","NONE","NONE"],"scale":0.85,"x":0.54,"y":0.91,"toggleSwitch":false,"text":"","iconId":15},
+    {"type":"BUTTON","shape":"CIRCLE","bindings":["KEY_SHIFT_L","NONE","NONE","NONE"],"scale":0.85,"x":0.05,"y":0.73,"toggleSwitch":false,"text":"","iconId":0},
+    {"type":"BUTTON","shape":"CIRCLE","bindings":["KEY_V","NONE","NONE","NONE"],"scale":0.85,"x":0.95,"y":0.73,"toggleSwitch":false,"text":"","iconId":0}
+  ],
+  "controllers": [
+    {
+      "id": "*",
+      "name": "Default Physical Controller",
+      "controllerBindings": [
+        {"keyCode": 96, "binding": "KEY_SPACE"},
+        {"keyCode": 97, "binding": "KEY_CTRL_L"},
+        {"keyCode": 99, "binding": "KEY_R"},
+        {"keyCode": 100, "binding": "KEY_E"},
+        {"keyCode": 102, "binding": "KEY_G"},
+        {"keyCode": 103, "binding": "MOUSE_LEFT_BUTTON"},
+        {"keyCode": 104, "binding": "KEY_F"},
+        {"keyCode": 105, "binding": "MOUSE_RIGHT_BUTTON"},
+        {"keyCode": 106, "binding": "KEY_SHIFT_L"},
+        {"keyCode": 107, "binding": "KEY_V"},
+        {"keyCode": 108, "binding": "KEY_TAB"},
+        {"keyCode": 109, "binding": "KEY_ESC"},
+        {"keyCode": 19, "binding": "KEY_1"},
+        {"keyCode": 20, "binding": "KEY_3"},
+        {"keyCode": 21, "binding": "KEY_4"},
+        {"keyCode": 22, "binding": "KEY_2"},
+        {"keyCode": -3, "binding": "KEY_W"},
+        {"keyCode": -4, "binding": "KEY_S"},
+        {"keyCode": -1, "binding": "KEY_A"},
+        {"keyCode": -2, "binding": "KEY_D"},
+        {"keyCode": -7, "binding": "MOUSE_MOVE_UP"},
+        {"keyCode": -8, "binding": "MOUSE_MOVE_DOWN"},
+        {"keyCode": -5, "binding": "MOUSE_MOVE_LEFT"},
+        {"keyCode": -6, "binding": "MOUSE_MOVE_RIGHT"}
+      ]
+    }
+  ]
+}

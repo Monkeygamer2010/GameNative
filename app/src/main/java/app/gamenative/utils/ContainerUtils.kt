@@ -247,6 +247,8 @@ object ContainerUtils {
             touchscreenMode = touchscreenMode,
             emulateKeyboardMouse = container.isEmulateKeyboardMouse(),
             controllerEmulationBindings = container.getControllerEmulationBindings()?.toString() ?: "",
+            controlsProfileId = container.controlsProfileId,
+            autoHideControls = container.autoHideControls,
             csmt = csmt,
             videoPciDeviceID = videoPciDeviceID,
             offScreenRenderingMode = offScreenRenderingMode,
@@ -376,7 +378,9 @@ object ContainerUtils {
         container.setInputType(api.ordinal)
         container.setDinputMapperType(containerData.dinputMapperType)
         container.setUseDRI3(containerData.useDRI3)
-        Timber.d("Container set: preferredInputApi=%s, dinputMapperType=0x%02x", api, containerData.dinputMapperType)
+        container.controlsProfileId = containerData.controlsProfileId
+        container.autoHideControls = containerData.autoHideControls
+        Timber.d("Container set: preferredInputApi=%s, dinputMapperType=0x%02x, controlsProfileId=%d, autoHide=%b", api, containerData.dinputMapperType, containerData.controlsProfileId, containerData.autoHideControls)
 
         if (saveToDisk) {
             // If bionic arm64ec, persist FEXCore settings directly
@@ -834,5 +838,38 @@ object ContainerUtils {
             // Add other platforms here..
             else -> GameSource.STEAM // default fallback
         }
+    }
+
+    /**
+     * Migrates legacy container mouse/touch settings to the profile
+     *
+     * This handles backwards compatibility for containers that have disableMouseInput
+     * and touchscreenMode settings stored at container level. These settings have
+     * been moved to the profile level for better organization.
+     *
+     * @param context Android context
+     * @param container The container to migrate
+     * @return true if migration was performed, false if already migrated
+     */
+    fun migrateMouseTouchSettingsToProfile(context: Context, container: Container): Boolean {
+        // Get the profile for this container
+        val inputControlsManager = InputControlsManager(context)
+        val profile = inputControlsManager.getProfile(container.controlsProfileId) ?: return false
+
+        // Check if migration is needed - if profile already has non-default values, assume migrated
+        // Default values are: disableTouchpadMouse = false, touchscreenMode = false
+        val alreadyMigrated = profile.isDisableTouchpadMouse || profile.isTouchscreenMode
+
+        if (!alreadyMigrated && (container.isDisableMouseInput || container.isTouchscreenMode)) {
+            // Migrate the settings from container to profile
+            profile.setDisableTouchpadMouse(container.isDisableMouseInput)
+            profile.setTouchscreenMode(container.isTouchscreenMode)
+            profile.save()
+
+            Timber.i("Migrated mouse/touch settings from container ${container.id} to profile ${profile.id}")
+            return true
+        }
+
+        return false
     }
 }
