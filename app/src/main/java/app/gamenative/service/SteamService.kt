@@ -151,6 +151,7 @@ import app.gamenative.data.CachedLicense
 import com.winlator.container.Container
 import `in`.dragonbra.javasteam.depotdownloader.data.AppItem
 import `in`.dragonbra.javasteam.depotdownloader.data.DownloadItem
+import `in`.dragonbra.javasteam.depotdownloader.data.PubFileItem
 import `in`.dragonbra.javasteam.steam.handlers.steamapps.License
 import `in`.dragonbra.javasteam.steam.handlers.steamuser.callback.PlayingSessionStateCallback
 import `in`.dragonbra.javasteam.steam.steamclient.AsyncJobFailedException
@@ -549,6 +550,23 @@ class SteamService : Service(), IChallengeUrlChanged {
                 return externalPath.pathString
             }
             return internalPath.pathString
+        }
+
+        /**
+         * Get list of controller config published file IDs to download for an app.
+         * Filters for Xbox controllers (xbox360, xboxone) with default/public branches.
+         */
+        fun getControllerConfigsToDownload(appId: Int): List<Long> {
+            val appInfo = getAppInfoOf(appId) ?: return emptyList()
+
+            return appInfo.config.steamControllerConfigDetails
+                .filter { detail ->
+                    // Filter for Xbox controllers
+                    detail.controllerType in listOf("controller_xbox360", "controller_xboxone") &&
+                    // Filter for default/public branches (matching Python script logic)
+                    ("default" in detail.enabledBranches || "public" in detail.enabledBranches)
+                }
+                .map { it.publishedFileId }
         }
 
         private fun isExecutable(flags: Any): Boolean = when (flags) {
@@ -1025,6 +1043,27 @@ class SteamService : Service(), IChallengeUrlChanged {
                         // Add item to downloader
                         depotDownloader.add(appItem)
 
+                        // Add controller config published files
+                        val controllerConfigFileIds = getControllerConfigsToDownload(appId)
+                        if (controllerConfigFileIds.isNotEmpty()) {
+                            val controllerConfigsDir = File(getAppDirPath(appId), "controller_configs")
+                            controllerConfigsDir.mkdirs()
+
+                            controllerConfigFileIds.forEach { publishedFileId ->
+                                try {
+                                    val pubFileItem = PubFileItem(
+                                        appId = appId,
+                                        pubFile = publishedFileId,
+                                        installDirectory = controllerConfigsDir.absolutePath
+                                    )
+                                    depotDownloader.add(pubFileItem)
+                                    Timber.d("Added controller config PubFileItem: appId=$appId, publishedFileId=$publishedFileId")
+                                } catch (e: Exception) {
+                                    Timber.w(e, "Failed to create PubFileItem for controller config: appId=$appId, publishedFileId=$publishedFileId")
+                                }
+                            }
+                        }
+
                         // Signal that no more items will be added
                         depotDownloader.finishAdding()
 
@@ -1064,34 +1103,56 @@ class SteamService : Service(), IChallengeUrlChanged {
             private val entitledDepotIds: List<Int>,
         ) : IDownloadListener {
             override fun onItemAdded(item: DownloadItem) {
-                Timber.d("Item ${item.appId} added to queue")
+                when (item) {
+                    is AppItem -> Timber.d("AppItem ${item.appId} added to queue")
+                    is PubFileItem -> Timber.d("PubFileItem ${item.pubFile} for app ${item.appId} added to queue (controller config)")
+                    else -> Timber.d("Item ${item.appId} added to queue")
+                }
             }
 
             override fun onDownloadStarted(item: DownloadItem) {
-                Timber.i("Item ${item.appId} download started")
+                when (item) {
+                    is AppItem -> Timber.i("AppItem ${item.appId} download started")
+                    is PubFileItem -> Timber.i("Controller config PubFileItem ${item.pubFile} for app ${item.appId} download started")
+                    else -> Timber.i("Item ${item.appId} download started")
+                }
             }
 
             override fun onDownloadCompleted(item: DownloadItem) {
-                Timber.i("Item ${item.appId} download completed")
-                // Handle completion: add marker, update database
-                val ownedDlc = runBlocking { getOwnedAppDlc(appId) }
-                MarkerUtils.addMarker(getAppDirPath(appId), Marker.DOWNLOAD_COMPLETE_MARKER)
-                runBlocking {
-                    instance?.appInfoDao?.insert(
-                        AppInfo(
-                            appId,
-                            isDownloaded = true,
-                            downloadedDepots = entitledDepotIds,
-                            dlcDepots = ownedDlc.values.map { it.dlcAppId }.distinct()
-                        )
-                    )
+                when (item) {
+                    is AppItem -> {
+                        Timber.i("AppItem ${item.appId} download completed")
+                        // Handle completion: add marker, update database
+                        val ownedDlc = runBlocking { getOwnedAppDlc(appId) }
+                        MarkerUtils.addMarker(getAppDirPath(appId), Marker.DOWNLOAD_COMPLETE_MARKER)
+                        runBlocking {
+                            instance?.appInfoDao?.insert(
+                                AppInfo(
+                                    appId,
+                                    isDownloaded = true,
+                                    downloadedDepots = entitledDepotIds,
+                                    dlcDepots = ownedDlc.values.map { it.dlcAppId }.distinct()
+                                )
+                            )
+                        }
+                        MarkerUtils.removeMarker(getAppDirPath(appId), Marker.STEAM_DLL_REPLACED)
+                        downloadJobs.remove(appId)
+                    }
+                    is PubFileItem -> {
+                        Timber.i("Controller config PubFileItem ${item.pubFile} for app ${item.appId} download completed")
+                    }
+                    else -> {
+                        Timber.i("Item ${item.appId} download completed")
+                    }
                 }
-                MarkerUtils.removeMarker(getAppDirPath(appId), Marker.STEAM_DLL_REPLACED)
-                downloadJobs.remove(appId)
             }
 
             override fun onDownloadFailed(item: DownloadItem, error: Throwable) {
-                Timber.e(error, "Item ${item.appId} failed to download")
+                when (item) {
+                    is AppItem -> Timber.e(error, "AppItem ${item.appId} failed to download")
+                    is PubFileItem -> Timber.w(error, "Controller config PubFileItem ${item.pubFile} for app ${item.appId} failed to download (non-critical)")
+                    else -> Timber.e(error, "Item ${item.appId} failed to download")
+                }
             }
 
             override fun onStatusUpdate(message: String) {

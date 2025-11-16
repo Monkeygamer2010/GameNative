@@ -2,6 +2,7 @@ package app.gamenative.utils
 
 import app.gamenative.data.BranchInfo
 import app.gamenative.data.ConfigInfo
+import app.gamenative.data.ControllerConfigDetail
 import app.gamenative.data.DepotInfo
 import app.gamenative.data.LaunchInfo
 import app.gamenative.data.LibraryAssetsInfo
@@ -143,6 +144,24 @@ fun KeyValue.generateSteamApp(): SteamApp {
             },
             steamControllerTemplateIndex = this["config"]["steamcontrollertemplateindex"].asInteger(),
             steamControllerTouchTemplateIndex = this["config"]["steamcontrollertouchtemplateindex"].asInteger(),
+            steamControllerConfigDetails = this["config"]["steamcontrollerconfigdetails"].children.mapNotNull { configEntry ->
+                configEntry.name?.toLongOrNull()?.let { fileId ->
+                    ControllerConfigDetail(
+                        publishedFileId = fileId,
+                        controllerType = configEntry["controller_type"].value.orEmpty(),
+                        enabledBranches = configEntry["enabled_branches"].value.orEmpty(),
+                    )
+                }
+            },
+            steamControllerTouchConfigDetails = this["config"]["steamcontrollertouchconfigdetails"].children.mapNotNull { configEntry ->
+                configEntry.name?.toLongOrNull()?.let { fileId ->
+                    ControllerConfigDetail(
+                        publishedFileId = fileId,
+                        controllerType = configEntry["controller_type"].value.orEmpty(),
+                        enabledBranches = configEntry["enabled_branches"].value.orEmpty(),
+                    )
+                }
+            },
         ),
         ufs = UFS(
             quota = this["ufs"]["quota"].asInteger(),
