@@ -45,9 +45,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.gamenative.R
 import app.gamenative.service.SteamService
+import com.winlator.container.ContainerManager
 import com.winlator.contents.ContentProfile
 import com.winlator.contents.ContentsManager
 import kotlinx.coroutines.Dispatchers
@@ -77,9 +79,6 @@ fun WineProtonManagerDialog(open: Boolean, onDismiss: () -> Unit) {
     var deleteTarget by remember { mutableStateOf<ContentProfile?>(null) }
 
     val refreshInstalled: () -> Unit = {
-        try {
-            mgr.syncContents()
-        } catch (_: Exception) {}
         installedProfiles.clear()
         android.util.Log.d("WineProtonManager", "Refreshing installed profiles, list cleared")
         try {
@@ -96,7 +95,9 @@ fun WineProtonManagerDialog(open: Boolean, onDismiss: () -> Unit) {
     }
 
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) { mgr.syncContents() }
+        try {
+            withContext(Dispatchers.IO) { mgr.syncContents() }
+        } catch (_: Exception) {}
         refreshInstalled()
     }
 
@@ -281,7 +282,7 @@ fun WineProtonManagerDialog(open: Boolean, onDismiss: () -> Unit) {
                         )
                         Column {
                             Text(
-                                text = stringResource(R.string.wine_proton_bionic_only),
+                                text = stringResource(R.string.wine_proton_bionic_notice_header),
                                 style = MaterialTheme.typography.titleSmall,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -304,6 +305,12 @@ fun WineProtonManagerDialog(open: Boolean, onDismiss: () -> Unit) {
                     text = stringResource(R.string.wine_proton_select_file_description),
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(bottom = 8.dp)
+                )
+                Text(
+                    text = stringResource(R.string.win_proton_example),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                    fontWeight = FontWeight.Bold
                 )
 
                 Button(
@@ -484,11 +491,66 @@ fun WineProtonManagerDialog(open: Boolean, onDismiss: () -> Unit) {
 
     // Delete confirmation
     deleteTarget?.let { target ->
+        // Check which containers are using this Wine/Proton version
+        val affectedContainers = remember(target) {
+            mutableStateListOf<String>().apply {
+                try {
+                    val containerManager = ContainerManager(ctx)
+                    val containers = containerManager.containers
+                    
+                    // Build identifier patterns to match against
+                    val identifierPattern = "${target.verName}-${target.verCode}"
+                    
+                    containers.forEach { container ->
+                        val wineVersion = container.wineVersion
+                        android.util.Log.d("WineProtonManager", "Checking container ${container.name}: wineVersion=$wineVersion against $identifierPattern")
+                        
+                        // Check if container's wine version matches this profile
+                        if (wineVersion != null && wineVersion.contains(target.verName, ignoreCase = true)) {
+                            add(container.name)
+                            android.util.Log.d("WineProtonManager", "Container ${container.name} uses this version")
+                        }
+                    }
+                    android.util.Log.d("WineProtonManager", "Found ${size} containers using ${target.verName}")
+                } catch (e: Exception) {
+                    android.util.Log.e("WineProtonManager", "Error checking containers", e)
+                }
+            }
+        }
+        
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
             title = { Text(stringResource(R.string.wine_proton_remove_title)) },
             text = {
-                Text(stringResource(R.string.wine_proton_remove_message, target.type, target.verName, target.verCode))
+                Column(modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
+                    Text(
+                        text = stringResource(R.string.wine_proton_remove_message, target.type, target.verName, target.verCode),
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+                    
+                    if (affectedContainers.isNotEmpty()) {
+                        Text(
+                            text = stringResource(R.string.wine_proton_containers_will_break),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                        affectedContainers.forEach { containerName ->
+                            Text(
+                                text = "• $containerName",
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.padding(start = 8.dp, bottom = 4.dp)
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = stringResource(R.string.wine_proton_no_containers_warning),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
