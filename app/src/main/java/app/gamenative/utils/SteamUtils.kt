@@ -907,44 +907,38 @@ object SteamUtils {
             override fun onFailure(call: Call, e: IOException) = callback(-1)
 
             override fun onResponse(call: Call, res: Response) {
-                res.use {
-                    val body = it.body?.string() ?: run { callback(-1); return }
-                    Timber.i("[DX Fetch] Raw fbody etchDirect3DMajor for body=%s", body)
+                try {
+                    res.use {
+                        val body = it.body?.string()
+                            ?: throw IllegalStateException("Response body is null")
+                        Timber.i("[DX Fetch] Raw fbody etchDirect3DMajor for body=%s", body)
 
-                    // Check if response is successful and body is valid JSON
-                    if (!it.isSuccessful || body.startsWith("error", ignoreCase = true)) {
-                        Timber.w("[DX Fetch] Failed to fetch Direct3D version: HTTP ${it.code}, body=$body")
-                        callback(-1)
-                        return
+                        val jsonObject = JSONObject(body)
+
+                        val arr = jsonObject.optJSONArray("cargoquery")
+                            ?: throw IllegalStateException("Missing cargoquery array in response")
+
+                        // There should be at most one row; take the first.
+                        val raw = arr.optJSONObject(0)
+                            ?.optJSONObject("title")
+                            ?.optString("Direct3D versions")
+                            ?.trim() ?: ""
+
+                        Timber.i("[DX Fetch] Raw fetchDirect3DMajor for raw=%s", raw)
+
+                        // Extract highest DX major number present.
+                        val dx = Regex("\\b(9|10|11|12)\\b")
+                            .findAll(raw)
+                            .map { it.value.toInt() }
+                            .maxOrNull() ?: -1
+
+                        Timber.i("[DX Fetch] dx fetchDirect3DMajor is dx=%d", dx)
+
+                        callback(dx)
                     }
-
-                    val jsonObject = try {
-                        JSONObject(body)
-                    } catch (e: Exception) {
-                        Timber.w(e, "[DX Fetch] Invalid JSON response: $body")
-                        callback(-1)
-                        return
-                    }
-
-                    val arr = jsonObject.optJSONArray("cargoquery") ?: run { callback(-1); return }
-
-                    // There should be at most one row; take the first.
-                    val raw = arr.optJSONObject(0)
-                        ?.optJSONObject("title")
-                        ?.optString("Direct3D versions")
-                        ?.trim() ?: ""
-
-                    Timber.i("[DX Fetch] Raw fetchDirect3DMajor for raw=%s", raw)
-
-                    // Extract highest DX major number present.
-                    val dx = Regex("\\b(9|10|11|12)\\b")
-                        .findAll(raw)
-                        .map { it.value.toInt() }
-                        .maxOrNull() ?: -1
-
-                    Timber.i("[DX Fetch] dx fetchDirect3DMajor is dx=%d", dx)
-
-                    callback(dx)
+                } catch (e: Exception) {
+                    Timber.e(e, "[DX Fetch] Error in fetchDirect3DMajor")
+                    callback(-1)
                 }
             }
         })
