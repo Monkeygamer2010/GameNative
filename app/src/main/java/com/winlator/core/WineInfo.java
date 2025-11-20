@@ -159,12 +159,8 @@ public class WineInfo implements Parcelable {
         ImageFs imageFs = ImageFs.find(context);
         String path = "";
 
-        Log.d("WineInfo", "========================================");
-        Log.d("WineInfo", "Creating WineInfo from identifier: '" + identifier + "'");
-        Log.d("WineInfo", "========================================");
-
         if (identifier.equals(MAIN_WINE_VERSION.identifier())) {
-            Log.d("WineInfo", "Using MAIN_WINE_VERSION");
+            Log.d("WineInfo", "Using MAIN_WINE_VERSION: " + identifier);
             return new WineInfo(MAIN_WINE_VERSION.type, MAIN_WINE_VERSION.version, MAIN_WINE_VERSION.arch, null);
         }
 
