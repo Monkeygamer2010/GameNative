@@ -172,6 +172,7 @@ public class ContainerManager {
             container.setRootDir(containerDir);
             container.loadData(data);
             ContentsManager contentsManager = new ContentsManager(context);
+            contentsManager.syncContents();
 
             boolean isMainWineVersion = !data.has("wineVersion") || WineInfo.isMainWineVersion(data.getString("wineVersion"));
             if (!isMainWineVersion) {
@@ -418,7 +419,7 @@ public class ContainerManager {
                 try {
                     if (wineInfo.isArm64EC()) {
                         extractCommonDlls(wineInfo, "aarch64-windows", "system32", containerDir, onExtractFileListener); // arm64ec only
-                     }else {
+                    } else {
                         extractCommonDlls(wineInfo, "x86_64-windows", "system32", containerDir, onExtractFileListener);
                     }
 

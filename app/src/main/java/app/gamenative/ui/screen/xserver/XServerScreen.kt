@@ -1809,6 +1809,7 @@ private fun applyGeneralPatches(
     Timber.i("Applying general patches")
     val rootDir = imageFs.getRootDir()
     val contentsManager = ContentsManager(context)
+    contentsManager.syncContents()
     if (container.containerVariant.equals(Container.GLIBC)) {
         FileUtils.delete(File(rootDir, "/opt/apps"))
         val downloaded = File(imageFs.getFilesDir(), "imagefs_patches_gamenative.tzst")
@@ -1962,6 +1963,7 @@ private fun restoreOriginalDllFiles(
     if (container.containerVariant.equals(Container.GLIBC)) {
         val cacheDir = File(rootDir, ImageFs.CACHE_PATH + "/original_dlls")
         val contentsManager = ContentsManager(context)
+        contentsManager.syncContents()
         if (cacheDir.isDirectory) {
             val windowsDir = File(rootDir, ImageFs.WINEPREFIX + "/drive_c/windows")
             val dirnames = cacheDir.list()
