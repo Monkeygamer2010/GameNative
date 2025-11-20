@@ -100,7 +100,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         synchronized (lock) {
             if (wineInfo.isArm64EC()) {
                 extractEmulatorsDlls();
-            }else {
+            } else {
                 extractBox64Files();
             }
             if (preUnpack != null) {
@@ -294,24 +294,23 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         if (wineInfo.path != null && !wineInfo.path.isEmpty()) {
             String wineDllPath;
             String wineLibPath;
-            
+
             // Use libPath from profile.json if available, otherwise default to "lib"
-            String libPathFromProfile = (wineInfo.libPath != null && !wineInfo.libPath.isEmpty()) 
-                ? wineInfo.libPath 
-                : "lib";
-            
+            String libPathFromProfile = (wineInfo.libPath != null && !wineInfo.libPath.isEmpty())
+                    ? wineInfo.libPath
+                    : "lib";
+
             Log.d("BionicProgramLauncherComponent", "wineInfo.libPath = " + wineInfo.libPath + ", using: " + libPathFromProfile);
-            
+
             if (isCustomWineInImagefs) {
-                // Wine in imagefs - For Bionic mode, Wine's internal hardcoded paths need 
-                // WINEDLLPATH to be RELATIVE to the working directory (imagefs root)
-                // because Wine resolves paths relative to where it's executed from
+                // Wine in imagefs - Use ABSOLUTE paths for imported Wine/Proton packages
+                // The imported Wine binaries are pre-compiled and expect absolute paths
                 String relativePath = wineInfo.path.replace(rootDir.getPath() + "/", "");
-                wineDllPath = relativePath + "/" + libPathFromProfile + "/wine";
-                wineLibPath = relativePath + "/" + libPathFromProfile;
-                // But LD_LIBRARY_PATH still needs absolute paths for the dynamic linker
-                envVars.put("LD_LIBRARY_PATH", wineInfo.path + "/" + libPathFromProfile + ":" + wineInfo.path + "/" + libPathFromProfile + "/wine:" + rootDir.getPath() + "/usr/lib" + ":" + "/system/lib64");
-                Log.d("BionicProgramLauncherComponent", "Custom Wine in imagefs (Bionic): WINEDLLPATH=" + wineDllPath + " (relative), LD_LIBRARY_PATH includes absolute paths");
+                wineDllPath = wineInfo.path + "/" + libPathFromProfile + "/wine";  // ABSOLUTE path
+                wineLibPath = wineInfo.path + "/" + libPathFromProfile;
+                // LD_LIBRARY_PATH uses absolute paths for the dynamic linker
+                envVars.put("LD_LIBRARY_PATH", wineLibPath + ":" + wineDllPath + ":" + rootDir.getPath() + "/usr/lib" + ":" + "/system/lib64");
+                Log.d("BionicProgramLauncherComponent", "Custom Wine in imagefs (Bionic): WINEDLLPATH=" + wineDllPath + " (absolute), LD_LIBRARY_PATH includes absolute paths");
             } else {
                 // Wine outside imagefs - use absolute paths
                 File optWineDir = new File(wineInfo.path, "opt/wine/lib/wine");
@@ -326,7 +325,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
                 envVars.put("LD_LIBRARY_PATH", wineLibPath + ":" + wineDllPath + ":" + rootDir.getPath() + "/usr/lib" + ":" + "/system/lib64");
                 Log.d("BionicProgramLauncherComponent", "Custom Wine outside imagefs: wineDllPath=" + wineDllPath);
             }
-            
+
             envVars.put("WINEDLLPATH", wineDllPath);
             // In Bionic mode with custom Wine, use absolute path for WINELOADER (no PRoot path translation)
             envVars.put("WINELOADER", winePath + "/wine");
@@ -381,11 +380,9 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         }
 
         ld_preload += ":" + evshimPath;
-        
-        // Only use libredirect for default Wine - custom Wine uses absolute paths and doesn't need path redirection
-        if (wineInfo.path == null || wineInfo.path.isEmpty()) {
-            ld_preload += ":" + replacePath;
-        }
+
+        // Always use libredirect - imported Wine binaries have hardcoded paths that need redirection
+        ld_preload += ":" + replacePath;
 
         envVars.put("LD_PRELOAD", ld_preload);
 
@@ -442,7 +439,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             command = winePath + "/" + guestExecutable;
             if (emulator.toLowerCase().equals("fexcore")) {
                 envVars.put("HODLL", "libwow64fex.dll");
-            }else {
+            } else {
                 envVars.put("HODLL", "wowbox64.dll");
             }
         } else {
@@ -496,7 +493,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             ContentProfile profile = contentsManager.getProfileByEntryName("wowbox64-" + wowbox64Version);
             if (profile != null) {
                 contentsManager.applyContent(profile);
-            }else {
+            } else {
                 Log.d("Extraction", "Extracting box64Version: " + wowbox64Version);
             }
             TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, environment.getContext(), "wowbox64/wowbox64-" + wowbox64Version + ".tzst", system32dir);
@@ -508,7 +505,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             ContentProfile profile = contentsManager.getProfileByEntryName("fexcore-" + fexcoreVersion);
             if (profile != null) {
                 contentsManager.applyContent(profile);
-            }else {
+            } else {
                 Log.d("Extraction", "Extracting fexcoreVersion: " + fexcoreVersion);
             }
             TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, environment.getContext(), "fexcore/fexcore-" + fexcoreVersion + ".tzst", system32dir);
@@ -603,18 +600,16 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         if (wineInfo.path != null && !wineInfo.path.isEmpty()) {
             String wineDllPath;
             String wineLibPath;
-            
+
             // Use libPath from profile.json if available, otherwise default to "lib"
-            String libPathFromProfile = (wineInfo.libPath != null && !wineInfo.libPath.isEmpty()) 
-                ? wineInfo.libPath 
-                : "lib";
-            
+            String libPathFromProfile = (wineInfo.libPath != null && !wineInfo.libPath.isEmpty())
+                    ? wineInfo.libPath
+                    : "lib";
+
             if (isCustomWineInImagefs) {
-                // Wine in imagefs - use relative paths
-                String imagefsPath = rootDir.getPath();
-                String relativePath = wineInfo.path.substring(imagefsPath.length());
-                wineDllPath = relativePath + "/" + libPathFromProfile + "/wine";
-                wineLibPath = relativePath + "/" + libPathFromProfile;
+                // Wine in imagefs - use ABSOLUTE paths for imported Wine/Proton packages
+                wineDllPath = wineInfo.path + "/" + libPathFromProfile + "/wine";
+                wineLibPath = wineInfo.path + "/" + libPathFromProfile;
             } else {
                 // Wine outside imagefs - use absolute paths
                 File optWineDir = new File(wineInfo.path, "opt/wine/lib/wine");
@@ -626,7 +621,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
                     wineLibPath = wineInfo.path + "/" + libPathFromProfile;
                 }
             }
-            
+
             envVars.put("WINEDLLPATH", wineDllPath);
             envVars.put("WINELOADER", winePathForEnv + "/wine");
             envVars.put("WINESERVER", winePathForEnv + "/wineserver");
@@ -650,6 +645,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             ld_preload += sysvPath;
         }
 
+        // Always use libredirect - imported Wine binaries have hardcoded paths that need redirection
         ld_preload += ":" + replacePath;
 
         envVars.put("LD_PRELOAD", ld_preload);

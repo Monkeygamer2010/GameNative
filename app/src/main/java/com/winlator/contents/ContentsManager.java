@@ -158,27 +158,41 @@ public class ContentsManager {
 
         File file = getTmpDir(context);
 
+        Log.d("ContentsManager", "Starting extraction to: " + file.getAbsolutePath());
+        long startTime = System.currentTimeMillis();
+
         boolean ret;
+        Log.d("ContentsManager", "Attempting XZ extraction...");
         ret = TarCompressorUtils.extract(TarCompressorUtils.Type.XZ, context, uri, file);
         if (!ret) {
+            Log.d("ContentsManager", "XZ failed, attempting ZSTD extraction...");
             ret = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context, uri, file);
         }
         if (!ret) {
+            long elapsed = System.currentTimeMillis() - startTime;
+            Log.e("ContentsManager", "Extraction failed after " + elapsed + "ms");
             callback.onFailed(InstallFailedReason.ERROR_BADTAR, null);
             return;
         }
 
+        long extractTime = System.currentTimeMillis() - startTime;
+        Log.d("ContentsManager", "Extraction completed in " + extractTime + "ms, validating...");
+
         File proFile = new File(file, PROFILE_NAME);
         if (!proFile.exists()) {
+            Log.e("ContentsManager", "profile.json not found");
             callback.onFailed(InstallFailedReason.ERROR_NOPROFILE, null);
             return;
         }
 
         ContentProfile profile = readProfile(proFile);
         if (profile == null) {
+            Log.e("ContentsManager", "Failed to parse profile.json");
             callback.onFailed(InstallFailedReason.ERROR_BADPROFILE, null);
             return;
         }
+
+        Log.d("ContentsManager", "Profile parsed: type=" + profile.type + ", version=" + profile.verName);
 
         String imagefsPath = context.getFilesDir().getAbsolutePath() + "/imagefs";
         for (ContentProfile.ContentFile contentFile : profile.fileList) {
@@ -264,16 +278,13 @@ public class ContentsManager {
                 contentFile.target = contentFileJSONObject.getString(ContentProfile.MARK_FILE_TARGET);
                 fileList.add(contentFile);
             }
-            if (typeName.equals(ContentProfile.ContentType.CONTENT_TYPE_WINE.toString())) {
+            // Both Wine and Proton use the "wine" key in profile.json
+            if (typeName.equals(ContentProfile.ContentType.CONTENT_TYPE_WINE.toString())
+                    || typeName.equals(ContentProfile.ContentType.CONTENT_TYPE_PROTON.toString())) {
                 JSONObject wineJSONObject = profileJSONObject.getJSONObject(ContentProfile.MARK_WINE);
                 profile.wineLibPath = wineJSONObject.getString(ContentProfile.MARK_WINE_LIBPATH);
                 profile.wineBinPath = wineJSONObject.getString(ContentProfile.MARK_WINE_BINPATH);
                 profile.winePrefixPack = wineJSONObject.getString(ContentProfile.MARK_WINE_PREFIX_PACK);
-            } else if (typeName.equals(ContentProfile.ContentType.CONTENT_TYPE_PROTON.toString())) {
-                JSONObject protonJSONObject = profileJSONObject.getJSONObject(ContentProfile.MARK_PROTON);
-                profile.wineLibPath = protonJSONObject.getString(ContentProfile.MARK_PROTON_LIBPATH);
-                profile.wineBinPath = protonJSONObject.getString(ContentProfile.MARK_PROTON_BINPATH);
-                profile.winePrefixPack = protonJSONObject.getString(ContentProfile.MARK_PROTON_PREFIX_PACK);
             }
 
             profile.type = ContentProfile.ContentType.getTypeByName(typeName);
@@ -466,23 +477,52 @@ public class ContentsManager {
     }
 
     public ContentProfile getProfileByEntryName(String entryName) {
-        int firstDashIndex = entryName.indexOf('-');
+        Log.d("ContentsManager", "🔍 getProfileByEntryName called with: '" + entryName + "'");
         int lastDashIndex = entryName.lastIndexOf('-');
 
         try {
-            String typeName = entryName.substring(0, firstDashIndex);
-            String versionName = entryName.substring(firstDashIndex + 1, lastDashIndex);
+            // Extract version code (everything after last dash)
             String versionCode = entryName.substring(lastDashIndex + 1);
+            // Everything before last dash is the full version name (including type prefix if present)
+            String fullVersionName = entryName.substring(0, lastDashIndex);
 
-            ContentProfile.ContentType type = ContentProfile.ContentType.getTypeByName(typeName);
+            Log.d("ContentsManager", "   Parsed: fullVersionName='" + fullVersionName + "', versionCode='" + versionCode + "'");
+
+            // Try to determine type from the full version name
+            ContentProfile.ContentType type = null;
+            if (fullVersionName.toLowerCase().startsWith("proton-") || fullVersionName.equalsIgnoreCase("proton")) {
+                type = ContentProfile.ContentType.CONTENT_TYPE_PROTON;
+            } else if (fullVersionName.toLowerCase().startsWith("wine-") || fullVersionName.equalsIgnoreCase("wine")) {
+                type = ContentProfile.ContentType.CONTENT_TYPE_WINE;
+            } else {
+                // Try other types
+                int firstDash = fullVersionName.indexOf('-');
+                if (firstDash > 0) {
+                    String possibleType = fullVersionName.substring(0, firstDash);
+                    type = ContentProfile.ContentType.getTypeByName(possibleType);
+                }
+            }
+
+            Log.d("ContentsManager", "   Detected ContentType: " + type);
+
             if (type != null && profilesMap.get(type) != null) {
-                for (ContentProfile profile : profilesMap.get(type)) {
-                    if (versionName.equals(profile.verName) && Integer.parseInt(versionCode) == profile.verCode) {
+                List<ContentProfile> profiles = profilesMap.get(type);
+                Log.d("ContentsManager", "   Found " + profiles.size() + " profiles of type " + type);
+
+                for (ContentProfile profile : profiles) {
+                    Log.d("ContentsManager", "   Checking profile: verName='" + profile.verName + "', verCode=" + profile.verCode);
+                    // Match against the full version name (profile.verName already has type prefix from readProfile)
+                    if (fullVersionName.equalsIgnoreCase(profile.verName) && Integer.parseInt(versionCode) == profile.verCode) {
+                        Log.d("ContentsManager", "   ✅ MATCH FOUND!");
                         return profile;
                     }
                 }
+                Log.d("ContentsManager", "   ❌ No matching profile found in primary lookup");
+            } else {
+                Log.d("ContentsManager", "   ❌ Type is null or no profiles for this type");
             }
         } catch (Exception e) {
+            Log.d("ContentsManager", "   ❌ Exception in primary lookup: " + e.getMessage());
         }
 
         // Fallback: Try Wine and Proton lists if entry name doesn't have type prefix

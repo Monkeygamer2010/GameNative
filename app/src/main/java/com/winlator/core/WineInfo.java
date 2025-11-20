@@ -168,14 +168,47 @@ public class WineInfo implements Parcelable {
             return new WineInfo(MAIN_WINE_VERSION.type, MAIN_WINE_VERSION.version, MAIN_WINE_VERSION.arch, null);
         }
 
-        // Try to lookup with version code appended (identifier might be missing -0 at the end)
-        Log.d("WineInfo", "Trying lookup with: '" + identifier + "-0'");
-        ContentProfile wineProfile = contentsManager.getProfileByEntryName(identifier + "-0");
+        // Try multiple lookup variations to handle different identifier formats
+        ContentProfile wineProfile = null;
 
-        // Fallback to identifier as-is if not found
+        // Try with version code 0 appended
+        Log.d("WineInfo", "Trying lookup with: '" + identifier + "-0'");
+        wineProfile = contentsManager.getProfileByEntryName(identifier + "-0");
+
+        // Try identifier as-is
         if (wineProfile == null) {
             Log.d("WineInfo", "First lookup failed, trying: '" + identifier + "'");
             wineProfile = contentsManager.getProfileByEntryName(identifier);
+        }
+
+        // Try with capitalized type (e.g., "proton" → "Proton")
+        if (wineProfile == null && (identifier.startsWith("proton-") || identifier.startsWith("wine-"))) {
+            String capitalizedIdentifier = Character.toUpperCase(identifier.charAt(0)) + identifier.substring(1);
+            Log.d("WineInfo", "🔍 BREAKPOINT 1: Starting capitalized lookup. capitalizedIdentifier='" + capitalizedIdentifier + "'");
+            for (int verCode = 0; verCode <= 10 && wineProfile == null; verCode++) {
+                String lookup = capitalizedIdentifier + "-" + verCode;
+                Log.d("WineInfo", "🔍 BREAKPOINT 2: Trying with capitalized type and version code " + verCode + ": '" + lookup + "'");
+                wineProfile = contentsManager.getProfileByEntryName(lookup);
+                Log.d("WineInfo", "🔍 BREAKPOINT 3: getProfileByEntryName('" + lookup + "') returned: " + (wineProfile != null ? "PROFILE OBJECT" : "NULL"));
+                if (wineProfile != null) {
+                    Log.d("WineInfo", "🔍 BREAKPOINT 4: ✅ FOUND PROFILE at version code " + verCode);
+                    break;
+                }
+            }
+        }
+
+        // Try replacing dots with dashes (e.g., "proton-10.0-arm64ec" → "proton-10-arm64ec-0")
+        if (wineProfile == null && identifier.contains(".")) {
+            String identifierWithDashes = identifier.replace('.', '-');
+            Log.d("WineInfo", "Trying with dots replaced by dashes: '" + identifierWithDashes + "-0'");
+            wineProfile = contentsManager.getProfileByEntryName(identifierWithDashes + "-0");
+        }
+
+        // Try replacing dots with dashes, no version code
+        if (wineProfile == null && identifier.contains(".")) {
+            String identifierWithDashes = identifier.replace('.', '-');
+            Log.d("WineInfo", "Trying with dots replaced by dashes, no suffix: '" + identifierWithDashes + "'");
+            wineProfile = contentsManager.getProfileByEntryName(identifierWithDashes);
         }
 
         Log.d("WineInfo", "Wine profile lookup result: " + (wineProfile != null ? "FOUND" : "NULL"));
@@ -193,7 +226,7 @@ public class WineInfo implements Parcelable {
             if (wineProfile != null && (wineProfile.type == ContentProfile.ContentType.CONTENT_TYPE_WINE || wineProfile.type == ContentProfile.ContentType.CONTENT_TYPE_PROTON)) {
                 path = ContentsManager.getInstallDir(context, wineProfile).getPath();
                 Log.d("WineInfo", "Wine path for wineinfo: " + path);
-                
+
                 // Create WineInfo and set libPath from profile
                 WineInfo wineInfo = new WineInfo(matcher.group(1), matcher.group(2), matcher.group(4), path);
                 wineInfo.libPath = wineProfile.wineLibPath;

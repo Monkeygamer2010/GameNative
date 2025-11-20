@@ -910,8 +910,23 @@ object SteamUtils {
                 res.use {
                     val body = it.body?.string() ?: run { callback(-1); return }
                     Timber.i("[DX Fetch] Raw fbody etchDirect3DMajor for body=%s", body)
-                    val arr = JSONObject(body)
-                        .optJSONArray("cargoquery") ?: run { callback(-1); return }
+
+                    // Check if response is successful and body is valid JSON
+                    if (!it.isSuccessful || body.startsWith("error", ignoreCase = true)) {
+                        Timber.w("[DX Fetch] Failed to fetch Direct3D version: HTTP ${it.code}, body=$body")
+                        callback(-1)
+                        return
+                    }
+
+                    val jsonObject = try {
+                        JSONObject(body)
+                    } catch (e: Exception) {
+                        Timber.w(e, "[DX Fetch] Invalid JSON response: $body")
+                        callback(-1)
+                        return
+                    }
+
+                    val arr = jsonObject.optJSONArray("cargoquery") ?: run { callback(-1); return }
 
                     // There should be at most one row; take the first.
                     val raw = arr.optJSONObject(0)

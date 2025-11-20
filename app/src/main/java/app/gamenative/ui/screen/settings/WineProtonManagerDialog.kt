@@ -108,7 +108,7 @@ fun WineProtonManagerDialog(open: Boolean, onDismiss: () -> Unit) {
 
         scope.launch {
             isBusy = true
-            statusMessage = "Validating Wine/Proton package..."
+            statusMessage = "Extracting and validating package (this may take 2-3 minutes for large files)..."
 
             // Get filename and detect type
             val filename = ctx.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -154,25 +154,33 @@ fun WineProtonManagerDialog(open: Boolean, onDismiss: () -> Unit) {
                         return@withContext Triple(profile, failReason, err)
                     }
 
+                    android.util.Log.d("WineProtonManager", "Starting extraction and validation...")
+                    val startTime = System.currentTimeMillis()
+
                     mgr.extraContentFile(uri, object : ContentsManager.OnInstallFinishedCallback {
-                        override fun onFailed(reason: ContentsManager.InstallFailedReason, e: Exception) {
-                            android.util.Log.e("WineProtonManager", "Extraction failed: $reason", e)
+                        override fun onFailed(reason: ContentsManager.InstallFailedReason, e: Exception?) {
+                            val elapsed = (System.currentTimeMillis() - startTime) / 1000.0
+                            android.util.Log.e("WineProtonManager", "Extraction failed after ${elapsed}s: $reason", e)
                             failReason = reason
                             err = e
                             latch.countDown()
                         }
 
                         override fun onSucceed(profileArg: ContentProfile) {
-                            android.util.Log.d("WineProtonManager", "Extraction succeeded, profile: ${profileArg.verName}")
+                            val elapsed = (System.currentTimeMillis() - startTime) / 1000.0
+                            android.util.Log.d("WineProtonManager", "Extraction succeeded after ${elapsed}s, profile: ${profileArg.verName}")
                             profile = profileArg
                             latch.countDown()
                         }
                     })
                 } catch (e: Exception) {
+                    android.util.Log.e("WineProtonManager", "Exception during extraction", e)
                     err = e
                     latch.countDown()
                 }
+                android.util.Log.d("WineProtonManager", "Waiting for extraction to complete...")
                 latch.await()
+                android.util.Log.d("WineProtonManager", "Extraction wait completed")
                 Triple(profile, failReason, err)
             }
 
@@ -488,7 +496,7 @@ fun WineProtonManagerDialog(open: Boolean, onDismiss: () -> Unit) {
             },
             confirmButton = {
                 TextButton(onClick = {
-                    scope.launch { 
+                    scope.launch {
                         try {
                             android.util.Log.d("WineProtonManager", "Attempting to delete: ${target.type} ${target.verName} (${target.verCode})")
                             withContext(Dispatchers.IO) {
