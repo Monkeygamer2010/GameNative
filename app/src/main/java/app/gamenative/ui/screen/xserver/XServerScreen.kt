@@ -34,6 +34,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.gamenative.PluviaApp
 import app.gamenative.PrefManager
+import app.gamenative.data.GameSource
 import app.gamenative.data.LaunchInfo
 import app.gamenative.data.SteamApp
 import app.gamenative.events.AndroidEvent
@@ -43,6 +44,9 @@ import app.gamenative.ui.component.dialog.InGameProfileManagerDialog
 import app.gamenative.ui.component.dialog.UnifiedProfileEditorDialog
 import app.gamenative.ui.data.XServerState
 import app.gamenative.utils.ContainerUtils
+import app.gamenative.utils.CustomGameScanner
+import app.gamenative.utils.SteamUtils
+import app.gamenative.utils.SteamUtils.writeColdClientIni
 import com.posthog.PostHog
 import com.winlator.alsaserver.ALSAClient
 import com.winlator.container.Container
@@ -156,23 +160,21 @@ fun XServerScreen(
     var taskAffinityMask = 0
     var taskAffinityMaskWoW64 = 0
 
+    val container = remember(appId) {
+        ContainerUtils.getContainer(context, appId)
+    }
+
     val xServerState = rememberSaveable(stateSaver = XServerState.Saver) {
-        if (ContainerUtils.hasContainer(context, appId)) {
-            val container = ContainerUtils.getContainer(context, appId)
-            // Emulation wiring moved to InputControlsView init block
-            mutableStateOf(
-                XServerState(
-                    graphicsDriver = container.graphicsDriver,
-                    graphicsDriverVersion = container.graphicsDriverVersion,
-                    audioDriver = container.audioDriver,
-                    dxwrapper = container.dxWrapper,
-                    dxwrapperConfig = DXVKHelper.parseConfig(container.dxWrapperConfig),
-                    screenSize = container.screenSize,
-                ),
-            )
-        } else {
-            mutableStateOf(XServerState())
-        }
+        mutableStateOf(
+            XServerState(
+                graphicsDriver = container.graphicsDriver,
+                graphicsDriverVersion = container.graphicsDriverVersion,
+                audioDriver = container.audioDriver,
+                dxwrapper = container.dxWrapper,
+                dxwrapperConfig = DXVKHelper.parseConfig(container.dxWrapperConfig),
+                screenSize = container.screenSize,
+            ),
+        )
     }
 
     // val xServer by remember {
@@ -194,7 +196,6 @@ fun XServerScreen(
     // var pointerEventListener by remember { mutableStateOf<Callback<MotionEvent>?>(null) }
 
     val gameId = ContainerUtils.extractGameIdFromContainerId(appId)
-    val container = ContainerUtils.getContainer(context, appId)
     val appLaunchInfo = SteamService.getAppInfoOf(gameId)?.let { appInfo ->
         SteamService.getWindowsLaunchInfos(gameId).firstOrNull()
     }
@@ -218,7 +219,7 @@ fun XServerScreen(
     var profileEditorInitialTab by remember { mutableStateOf(0) }
     var currentActiveProfile by remember { mutableStateOf<ControlsProfile?>(null) }
 
-    val emulateKeyboardMouse = ContainerUtils.getContainer(context, appId).isEmulateKeyboardMouse()
+    val emulateKeyboardMouse = container.isEmulateKeyboardMouse()
 
     // Helper function to detect if a physical controller is connected
     fun isPhysicalControllerConnected(): Boolean {
@@ -377,7 +378,6 @@ fun XServerScreen(
                                 PostHog.capture(event = "onscreen_controller_enabled")
                                 val profiles = PluviaApp.inputControlsManager?.getProfiles(false) ?: listOf()
                                 if (profiles.isNotEmpty()) {
-                                    val container = ContainerUtils.getContainer(context, appId)
                                     val targetProfile = if (container.isEmulateKeyboardMouse()) {
                                         val profileName = container.id.toString()
                                         profiles.firstOrNull { it.name == profileName }
@@ -440,7 +440,7 @@ fun XServerScreen(
         ).show()
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(container) {
         registerBackAction(gameBack)
         onDispose {
             Timber.d("XServerScreen leaving, clearing back action")
@@ -448,7 +448,7 @@ fun XServerScreen(
         }   // reset when screen leaves
     }
 
-    DisposableEffect(lifecycleOwner) {
+    DisposableEffect(lifecycleOwner, container) {
         val onActivityDestroyed: (AndroidEvent.ActivityDestroyed) -> Unit = {
             Timber.i("onActivityDestroyed")
             exit(xServerView!!.getxServer().winHandler, PluviaApp.xEnvironment, frameRating, currentAppInfo, container, onExit, navigateBack)
@@ -572,8 +572,6 @@ fun XServerScreen(
                     // TODO: make 'force fullscreen' be an option of the app being launched
                     appLaunchInfo?.let { renderer.forceFullscreenWMClass = Paths.get(it.executable).name }
                 }
-                val container = ContainerUtils.getContainer(context, appId)
-
                 getxServer().windowManager.addOnWindowModificationListener(
                     object : WindowManager.OnWindowModificationListener {
                         private fun changeFrameRatingVisibility(window: Window, property: Property?) {
@@ -649,7 +647,6 @@ fun XServerScreen(
                     setupExecutor.submit {
                         try {
                             val containerManager = ContainerManager(context)
-                            val container = ContainerUtils.getContainer(context, appId)
                             // Configure WinHandler with container's input API settings
                             val handler = getxServer().winHandler
                             if (container.inputType !in 0..3) {
@@ -776,7 +773,6 @@ fun XServerScreen(
                 val profiles = PluviaApp.inputControlsManager?.getProfiles(false) ?: listOf()
                 PrefManager.init(context)
                 if (profiles.isNotEmpty()) {
-                    val container = ContainerUtils.getContainer(context, appId)
                     val targetProfile = if (container.isEmulateKeyboardMouse()) {
                         // Use emulation profile for keyboard/mouse emulation mode
                         val profileName = container.id.toString()
@@ -802,8 +798,6 @@ fun XServerScreen(
             // Add InputControlsView on top of XServerView
             frameLayout.addView(icView)
             hideInputControls()
-            val container = ContainerUtils.getContainer(context, appId)
-
             // If emulation is enabled, select the per-container profile (named by container id)
             if (container.isEmulateKeyboardMouse()) {
                 val profiles2 = PluviaApp.inputControlsManager?.getProfiles(false) ?: listOf()
@@ -1462,16 +1456,69 @@ private fun getWineStartCommand(
     FileUtils.clear(tempDir)
 
     Timber.tag("XServerScreen").d("appLaunchInfo is $appLaunchInfo")
-    val args = if (bootToContainer || appLaunchInfo == null) {
+
+    // Check if this is a Custom Game
+    val isCustomGame = ContainerUtils.extractGameSourceFromContainerId(appId) == GameSource.CUSTOM_GAME
+
+    val args = if (bootToContainer) {
+        "\"wfm.exe\""
+    } else if (isCustomGame) {
+        // For Custom Games, we can launch even without appLaunchInfo
+        // Use the executable path from container config. If missing, try to auto-detect
+        // a unique .exe in the game folder (ignoring installers like "unins*").
+        var executablePath = container.executablePath
+
+        // Find the A: drive (which should map to the game folder)
+        var gameFolderPath: String? = null
+        for (drive in Container.drivesIterator(container.drives)) {
+            if (drive[0] == "A") {
+                gameFolderPath = drive[1]
+                break
+            }
+        }
+
+        if (executablePath.isEmpty()) {
+            // Attempt auto-detection only when we have the physical folder path
+            if (gameFolderPath == null) {
+                Timber.tag("XServerScreen").e("Could not find A: drive for Custom Game: $appId")
+                return "winhandler.exe \"wfm.exe\""
+            }
+            val auto = CustomGameScanner.findUniqueExeRelativeToFolder(gameFolderPath!!)
+            if (auto != null) {
+                Timber.tag("XServerScreen").i("Auto-selected Custom Game exe: $auto")
+                executablePath = auto
+                container.executablePath = auto
+                container.saveData()
+            } else {
+                Timber.tag("XServerScreen").w("No unique executable found for Custom Game: $appId")
+                return "winhandler.exe \"wfm.exe\""
+            }
+        }
+
+        if (gameFolderPath == null) {
+            Timber.tag("XServerScreen").e("Could not find A: drive for Custom Game: $appId")
+            return "winhandler.exe \"wfm.exe\""
+        }
+
+        // Set working directory to the game folder
+        val executableDir = gameFolderPath + "/" + executablePath.substringBeforeLast("/", "")
+        guestProgramLauncherComponent.workingDir = File(executableDir)
+
+        // Normalize path separators (ensure Windows-style backslashes)
+        val normalizedPath = executablePath.replace('/', '\\')
+        envVars.put("WINEPATH", "A:\\")
+        "\"A:\\${normalizedPath}\""
+    } else if (appLaunchInfo == null) {
+        // For Steam games, we need appLaunchInfo
+        Timber.tag("XServerScreen").w("appLaunchInfo is null for Steam game: $appId")
         "\"wfm.exe\""
     } else {
+        val steamAppId = ContainerUtils.extractGameIdFromContainerId(appId)
         if (container.isLaunchRealSteam()) {
             // Launch Steam with the applaunch parameter to start the game
             "\"C:\\\\Program Files (x86)\\\\Steam\\\\steam.exe\" -silent -vgui -tcp " +
-                    "-nobigpicture -nofriendsui -nochatui -nointro -applaunch $appId"
+                    "-nobigpicture -nofriendsui -nochatui -nointro -applaunch $steamAppId"
         } else {
-            val steamAppId = ContainerUtils.extractGameIdFromContainerId(appId)
-            val appDirPath = SteamService.getAppDirPath(steamAppId)
             var executablePath = ""
             if (container.executablePath.isNotEmpty()) {
                 executablePath = container.executablePath
@@ -1480,22 +1527,29 @@ private fun getWineStartCommand(
                 container.executablePath = executablePath
                 container.saveData()
             }
-            val executableDir = appDirPath + "/" + executablePath.substringBeforeLast("/", "")
-            guestProgramLauncherComponent.workingDir = File(executableDir);
-            Timber.i("Working directory is ${executableDir}")
+            if (container.isUseLegacyDRM) {
+                val appDirPath = SteamService.getAppDirPath(steamAppId)
+                val executableDir = appDirPath + "/" + executablePath.substringBeforeLast("/", "")
+                guestProgramLauncherComponent.workingDir = File(executableDir);
+                Timber.i("Working directory is ${executableDir}")
 
-            Timber.i("Final exe path is " + executablePath)
-            val drives = container.drives
-            val driveIndex = drives.indexOf(appDirPath)
-            // greater than 1 since there is the drive character and the colon before the app dir path
-            val drive = if (driveIndex > 1) {
-                drives[driveIndex - 2]
+                Timber.i("Final exe path is " + executablePath)
+                val drives = container.drives
+                val driveIndex = drives.indexOf(appDirPath)
+                // greater than 1 since there is the drive character and the colon before the app dir path
+                val drive = if (driveIndex > 1) {
+                    drives[driveIndex - 2]
+                } else {
+                    Timber.e("Could not locate game drive")
+                    'D'
+                }
+                envVars.put("WINEPATH", "$drive:/${appLaunchInfo.workingDir}")
+                "\"$drive:/${executablePath}\""
             } else {
-                Timber.e("Could not locate game drive")
-                'D'
+                // Create ColdClientLoader.ini file
+                SteamUtils.writeColdClientIni(steamAppId, container)
+                "\"C:\\\\Program Files (x86)\\\\Steam\\\\steamclient_loader_x64.exe\""
             }
-            envVars.put("WINEPATH", "$drive:/${appLaunchInfo.workingDir}")
-            "\"$drive:/${executablePath}\""
         }
     }
 
@@ -1528,6 +1582,14 @@ private fun exit(winHandler: WinHandler?, environment: XEnvironment?, frameRatin
             "avg_fps" to (frameRating?.avgFPS ?: 0.0),
             "container_config" to container.containerJson)
     )
+
+    // Store session data in container metadata
+    frameRating?.let { rating ->
+        container.putSessionMetadata("avg_fps", rating.avgFPS)
+        container.putSessionMetadata("session_length_sec", rating.sessionLengthSec.toInt())
+        container.saveData()
+    }
+
     winHandler?.stop()
     environment?.stopEnvironmentComponents()
     SteamService.isGameRunning = false

@@ -80,6 +80,7 @@ data class ContainerData(
     val controlsProfileId: Int = 3,
     /** Auto-hide on-screen controls when physical controller is connected **/
     val autoHideControls: Boolean = false,
+    val useLegacyDRM: Boolean = false,
 ) {
     companion object {
         val Saver = mapSaver(
@@ -132,6 +133,7 @@ data class ContainerData(
                     "forceDlc" to state.forceDlc,
                     "controlsProfileId" to state.controlsProfileId,
                     "autoHideControls" to state.autoHideControls,
+                    "useLegacyDRM" to state.useLegacyDRM,
                 )
             },
             restore = { savedMap ->
@@ -183,6 +185,7 @@ data class ContainerData(
                     forceDlc = (savedMap["forceDlc"] as? Boolean) ?: false,
                     controlsProfileId = (savedMap["controlsProfileId"] as? Int) ?: 3,
                     autoHideControls = (savedMap["autoHideControls"] as? Boolean) ?: false,
+                    useLegacyDRM = (savedMap["useLegacyDRM"] as? Boolean) ?: false,
                 )
             },
         )

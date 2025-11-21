@@ -85,6 +85,7 @@ public class Container {
     private File rootDir;
     private String installPath = "";
     private JSONObject extraData;
+    private JSONObject sessionMetadata;
     private int rcfileId = 0;
     private String midiSoundFont = "";
     private int inputType = WinHandler.PreferredInputApi.BOTH.ordinal();
@@ -124,6 +125,8 @@ public class Container {
     private boolean gstreamerWorkaround = false;
 
     private boolean forceDlc = false;
+
+    private boolean useLegacyDRM = false;
 
     private String containerVariant = DEFAULT_VARIANT;
 
@@ -344,7 +347,7 @@ public class Container {
     }
 
     public String getCPUList() {
-        return getCPUList(false);
+        return getCPUList(true);
     }
 
     public String getCPUList(boolean allowFallback) {
@@ -356,7 +359,7 @@ public class Container {
     }
 
     public String getCPUListWoW64() {
-        return getCPUListWoW64(false);
+        return getCPUListWoW64(true);
     }
 
     public String getCPUListWoW64(boolean allowFallback) {
@@ -463,6 +466,36 @@ public class Container {
         catch (JSONException e) {
             Log.e("Container", "Failed to put extra: " + e);
         }
+    }
+
+    public String getSessionMetadata(String name) {
+        return getSessionMetadata(name, "");
+    }
+
+    public String getSessionMetadata(String name, String fallback) {
+        try {
+            return sessionMetadata != null && sessionMetadata.has(name) ? sessionMetadata.getString(name) : fallback;
+        }
+        catch (JSONException e) {
+            return fallback;
+        }
+    }
+
+    public void putSessionMetadata(String name, Object value) {
+        if (sessionMetadata == null) sessionMetadata = new JSONObject();
+        try {
+            if (value != null) {
+                sessionMetadata.put(name, value);
+            }
+            else sessionMetadata.remove(name);
+        }
+        catch (JSONException e) {
+            Log.e("Container", "Failed to put session metadata: " + e);
+        }
+    }
+
+    public void clearSessionMetadata() {
+        sessionMetadata = null;
     }
 
     public String getWineVersion() {
@@ -599,6 +632,7 @@ public class Container {
             data.put("box64Preset", box64Preset);
             data.put("desktopTheme", desktopTheme);
             data.put("extraData", extraData);
+            data.put("sessionMetadata", sessionMetadata);
             data.put("rcfileId", rcfileId);
             data.put("midiSoundFont", midiSoundFont);
             data.put("lc_all", lc_all);
@@ -630,6 +664,9 @@ public class Container {
 
             // Force DLC setting
             data.put("forceDlc", forceDlc);
+
+            // Use Legacy DRM setting
+            data.put("useLegacyDRM", useLegacyDRM);
 
             if (!WineInfo.isMainWineVersion(wineVersion)) data.put("wineVersion", wineVersion);
             FileUtils.writeString(getConfigFile(), data.toString());
@@ -718,6 +755,15 @@ public class Container {
                     setExtraData(extraData);
                     break;
                 }
+                case "sessionMetadata" : {
+                    try {
+                        JSONObject sessionMetadata = data.getJSONObject(key);
+                        this.sessionMetadata = sessionMetadata;
+                    } catch (JSONException e) {
+                        this.sessionMetadata = null;
+                    }
+                    break;
+                }
                 case "wineVersion" :
                     setWineVersion(data.getString(key));
                     break;
@@ -798,6 +844,9 @@ public class Container {
                     break;
                 case "forceDlc":
                     this.forceDlc = data.getBoolean(key);
+                    break;
+                case "useLegacyDRM":
+                    this.useLegacyDRM = data.getBoolean(key);
                     break;
             }
         }
@@ -895,6 +944,14 @@ public class Container {
 
     public void setForceDlc(boolean forceDlc) {
         this.forceDlc = forceDlc;
+    }
+
+    public boolean isUseLegacyDRM() {
+        return useLegacyDRM;
+    }
+
+    public void setUseLegacyDRM(boolean useLegacyDRM) {
+        this.useLegacyDRM = useLegacyDRM;
     }
 
     public JSONObject getControllerEmulationBindings() {

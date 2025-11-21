@@ -923,3 +923,55 @@ fun UnifiedProfileEditorDialog(
 /**
  * Helper function to show dialog for adding a control element
  */
+private fun showAddElementDialog(context: Context, view: InputControlsView) {
+    val profile = view.profile ?: return
+
+    val items = arrayOf(
+        "D-Pad",
+        "Button (Circle)",
+        "Button (Rectangle)",
+        "Button (Round Rectangle)",
+        "Analog Stick",
+        "Trackpad"
+    )
+
+    android.app.AlertDialog.Builder(context)
+        .setTitle("Add Control Element")
+        .setItems(items) { _, which ->
+            val type = when (which) {
+                0 -> com.winlator.inputcontrols.ControlElement.Type.D_PAD
+                1, 2, 3 -> com.winlator.inputcontrols.ControlElement.Type.BUTTON
+                4 -> com.winlator.inputcontrols.ControlElement.Type.STICK
+                5 -> com.winlator.inputcontrols.ControlElement.Type.TRACKPAD
+                else -> com.winlator.inputcontrols.ControlElement.Type.BUTTON
+            }
+
+            val shape = when (which) {
+                0, 1, 4, 5 -> com.winlator.inputcontrols.ControlElement.Shape.CIRCLE
+                2 -> com.winlator.inputcontrols.ControlElement.Shape.RECT
+                3 -> com.winlator.inputcontrols.ControlElement.Shape.ROUND_RECT
+                else -> com.winlator.inputcontrols.ControlElement.Shape.CIRCLE
+            }
+
+            // Create new element at center of screen using actual pixel coordinates
+            val element = com.winlator.inputcontrols.ControlElement(view)
+            element.setType(type)
+            element.setShape(shape)
+
+            // Use actual screen pixel coordinates (not Short.MAX_VALUE)
+            element.setX(view.width / 2)
+            element.setY(view.height / 2)
+            element.setScale(1.0f)
+
+            // Set a sensible default binding for buttons (Space key)
+            // Other types (D-Pad, Stick, Trackpad) already have defaults from reset()
+            if (type == com.winlator.inputcontrols.ControlElement.Type.BUTTON) {
+                element.setBindingAt(0, com.winlator.inputcontrols.Binding.KEY_SPACE)
+            }
+
+            profile.addElement(element)
+            profile.save()  // Save the profile so the new element is persisted
+            view.invalidate()
+        }
+        .show()
+}

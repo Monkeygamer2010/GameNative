@@ -5,11 +5,13 @@ import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.Network
-import android.net.NetworkRequest
 import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.IBinder
+import android.widget.Toast
 import androidx.room.withTransaction
 import app.gamenative.BuildConfig
+import app.gamenative.R
 import app.gamenative.PluviaApp
 import app.gamenative.PrefManager
 import app.gamenative.data.DepotInfo
@@ -280,6 +282,21 @@ class SteamService : Service(), IChallengeUrlChanged {
         private var instance: SteamService? = null
 
         private val downloadJobs = ConcurrentHashMap<Int, DownloadInfo>()
+
+        private fun notifyDownloadStarted(appId: Int) {
+            PluviaApp.events.emit(AndroidEvent.DownloadStatusChanged(appId, true))
+        }
+
+        private fun notifyDownloadStopped(appId: Int) {
+            PluviaApp.events.emit(AndroidEvent.DownloadStatusChanged(appId, false))
+        }
+
+        private fun removeDownloadJob(appId: Int) {
+            val removed = downloadJobs.remove(appId)
+            if (removed != null) {
+                notifyDownloadStopped(appId)
+            }
+        }
 
         /** Returns true if there is an incomplete download on disk (no complete marker). */
         fun hasPartialDownload(appId: Int): Boolean {
@@ -691,53 +708,26 @@ class SteamService : Service(), IChallengeUrlChanged {
                 })?.executable ?: ""
             }
 
-            // Create a temporary DepotDownloader instance for fetching manifests
-            val depotDownloader = runBlocking {
-                try {
-                    DepotDownloader(steamClient, instance!!.licenses, false, androidEmulation = true, maxDownloads = PrefManager.downloadSpeed)
-                } catch (e: Exception) {
-                    Timber.w(e, "Failed to create DepotDownloader for manifest fetching")
-                    null
+            for (depot in depots) {
+                val mi = depot.manifests["public"] ?: continue
+                if (mi.size > largestDepotSize) largestDepotSize = mi.size
+
+                // Check cache first
+                val man = DepotManifest.loadFromFile("${getAppDirPath(appId)}/.DepotDownloader/${depot.depotId}_${mi.gid}.manifest")
+
+                Timber.d("Using manifest for depot ${depot.depotId}  size=${mi.size}")
+
+                /* 1️⃣ exact launch entry that isn't a stub */
+                man?.files?.firstOrNull { f ->
+                    f.fileName.lowercase() in launchTargets && !f.isStub()
+                }?.let {
+                    Timber.i("Picked via launch entry: ${it.fileName}")
+                    return it.fileName.replace('\\','/').toString()
                 }
-            }
 
-            if (depotDownloader == null) {
-                Timber.w("Cannot fetch manifests: failed to create DepotDownloader")
-                // Fallback to last resort
-                return (getAppInfoOf(appId)?.let { appInfo ->
-                    getWindowsLaunchInfos(appId).firstOrNull()
-                })?.executable ?: ""
-            }
-
-            try {
-                for (depot in depots) {
-                    val mi = depot.manifests["public"] ?: continue
-                    if (mi.size > largestDepotSize) largestDepotSize = mi.size
-
-                    // Check cache first
-                    val man = DepotManifest.loadFromFile("${getAppDirPath(appId)}/.DepotDownloader/${depot.depotId}_${mi.gid}.manifest")
-
-                    Timber.d("Using manifest for depot ${depot.depotId}  size=${mi.size}")
-
-                    /* 1️⃣ exact launch entry that isn't a stub */
-                    man?.files?.firstOrNull { f ->
-                        f.fileName.lowercase() in launchTargets && !f.isStub()
-                    }?.let {
-                        Timber.i("Picked via launch entry: ${it.fileName}")
-                        return it.fileName.replace('\\','/').toString()
-                    }
-
-                    /* collect for later */
-                    man?.files?.filter { isExecutable(it.flags) || it.fileName.endsWith(".exe", true) }
-                        ?.forEach { flagged += it to mi.size }
-                }
-            } finally {
-                // Clean up DepotDownloader
-                try {
-                    depotDownloader.close()
-                } catch (e: Exception) {
-                    Timber.w(e, "Error closing DepotDownloader")
-                }
+                /* collect for later */
+                man?.files?.filter { isExecutable(it.flags) || it.fileName.endsWith(".exe", true) }
+                    ?.forEach { flagged += it to mi.size }
             }
 
             Timber.i("Flagged executable candidates: ${flagged.map { it.first.fileName }}")
@@ -794,7 +784,7 @@ class SteamService : Service(), IChallengeUrlChanged {
         fun downloadApp(appId: Int): DownloadInfo? {
             // Enforce Wi-Fi-only downloads
             if (PrefManager.downloadOnWifiOnly && instance?.isWifiConnected == false) {
-                instance?.notificationHelper?.notify("Not connected to Wi-Fi")
+                instance?.notificationHelper?.notify("Not connected to Wi‑Fi/LAN")
                 return null
             }
             return getAppInfoOf(appId)?.let { appInfo ->
@@ -947,7 +937,7 @@ class SteamService : Service(), IChallengeUrlChanged {
             Timber.d("Attempting to download " + appId + " with depotIds " + depotIds)
             // Enforce Wi-Fi-only downloads
             if (PrefManager.downloadOnWifiOnly && instance?.isWifiConnected == false) {
-                instance?.notificationHelper?.notify("Not connected to Wi-Fi")
+                instance?.notificationHelper?.notify("Not connected to Wi‑Fi/LAN")
                 return null
             }
             if (downloadJobs.contains(appId)) return getAppDownloadInfo(appId)
@@ -996,7 +986,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                 }
                 sizes.forEachIndexed { i, bytes -> di.setWeight(i, bytes) }
 
-                di.setDownloadJob(instance!!.scope.launch {
+                val downloadJob = instance!!.scope.launch {
                     try {
                         // Get licenses from database
                         val licenses = getLicensesFromDb()
@@ -1009,8 +999,8 @@ class SteamService : Service(), IChallengeUrlChanged {
                         val depotDownloader = DepotDownloader(
                             instance!!.steamClient!!,
                             licenses,
-                            false,
-                            androidEmulation = true
+                            debug = false,
+                            androidEmulation = true,
                         )
 
                         // Create listener
@@ -1045,12 +1035,19 @@ class SteamService : Service(), IChallengeUrlChanged {
                             di.setWeight(idx, 0)
                             di.setProgress(1f, idx)
                         }
-                        downloadJobs.remove(appId)
+                        removeDownloadJob(appId)
                     }
-                })
+                }
+                downloadJob.invokeOnCompletion { throwable ->
+                    if (throwable is kotlinx.coroutines.CancellationException) {
+                        removeDownloadJob(appId)
+                    }
+                }
+                di.setDownloadJob(downloadJob)
             }
 
             downloadJobs[appId] = info
+            notifyDownloadStarted(appId)
             return info
         }
 
@@ -1076,6 +1073,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                 // Handle completion: add marker, update database
                 val ownedDlc = runBlocking { getOwnedAppDlc(appId) }
                 MarkerUtils.addMarker(getAppDirPath(appId), Marker.DOWNLOAD_COMPLETE_MARKER)
+                PluviaApp.events.emit(AndroidEvent.LibraryInstallStatusChanged(appId))
                 runBlocking {
                     instance?.appInfoDao?.insert(
                         AppInfo(
@@ -1087,11 +1085,21 @@ class SteamService : Service(), IChallengeUrlChanged {
                     )
                 }
                 MarkerUtils.removeMarker(getAppDirPath(appId), Marker.STEAM_DLL_REPLACED)
-                downloadJobs.remove(appId)
+                removeDownloadJob(appId)
             }
 
             override fun onDownloadFailed(item: DownloadItem, error: Throwable) {
                 Timber.e(error, "Item ${item.appId} failed to download")
+                removeDownloadJob(appId)
+                instance?.let { service ->
+                    service.scope.launch(Dispatchers.Main) {
+                        Toast.makeText(
+                            service.applicationContext,
+                            service.getString(R.string.download_failed_try_again),
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
             }
 
             override fun onStatusUpdate(message: String) {
@@ -1847,7 +1855,7 @@ class SteamService : Service(), IChallengeUrlChanged {
         val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork)
         isWifiConnected = capabilities?.run {
             hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-                    hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+            hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
         } == true
         // Register callback for Wi-Fi connectivity
         networkCallback = object : ConnectivityManager.NetworkCallback() {
@@ -1869,8 +1877,8 @@ class SteamService : Service(), IChallengeUrlChanged {
                         Timber.d("Cancelling job")
                         info.cancel()
                         PluviaApp.events.emit(AndroidEvent.DownloadPausedDueToConnectivity(appId))
+                        removeDownloadJob(appId)
                     }
-                    downloadJobs.clear()
                     notificationHelper.notify("Download paused – waiting for Wi-Fi/LAN")
                 }
             }
@@ -1917,6 +1925,13 @@ class SteamService : Service(), IChallengeUrlChanged {
                 it.withCellID(PrefManager.cellId)
                 it.withServerListProvider(FileServerListProvider(File(serverListPath)))
                 it.withConnectionTimeout(60000L)
+                it.withHttpClient(
+                    OkHttpClient.Builder()
+                        .connectTimeout(10, TimeUnit.SECONDS)   // Time to establish connection
+                        .readTimeout(60, TimeUnit.SECONDS)      // Max inactivity between reads
+                        .writeTimeout(30, TimeUnit.SECONDS)     // Time for writes
+                        .build(),
+                )
             }
 
             // create our steam client instance
