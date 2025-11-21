@@ -55,6 +55,7 @@ import com.winlator.contents.ContentsManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.concurrent.CountDownLatch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -252,6 +253,32 @@ fun WineProtonManagerDialog(open: Boolean, onDismiss: () -> Unit) {
             if (profile.type != detectedType) {
                 statusMessage = ctx.getString(R.string.wine_proton_type_mismatch, detectedType, profile.type)
                 isStatusSuccess = false
+                Toast.makeText(ctx, statusMessage, Toast.LENGTH_LONG).show()
+                isBusy = false
+                SteamService.isImporting = false
+                return@launch
+            }
+
+            // Detect binary variant (glibc vs bionic)
+            val installDir = ContentsManager.getInstallDir(ctx, profile)
+            val binaryVariant = detectBinaryVariant(installDir)
+            android.util.Log.d("WineProtonManager", "Detected binary variant: $binaryVariant")
+
+            if (binaryVariant == "glibc") {
+                // Reject glibc builds - not supported in GameNative
+                statusMessage = ctx.getString(R.string.wine_proton_glibc_incompatible)
+                isStatusSuccess = false
+
+                // Clean up the extracted files
+                try {
+                    withContext(Dispatchers.IO) {
+                        mgr.removeContent(profile)
+                        android.util.Log.d("WineProtonManager", "Removed incompatible glibc build: ${profile.verName}")
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("WineProtonManager", "Error removing glibc build", e)
+                }
+
                 Toast.makeText(ctx, statusMessage, Toast.LENGTH_LONG).show()
                 isBusy = false
                 SteamService.isImporting = false
@@ -628,6 +655,45 @@ private suspend fun performFinishInstall(
     }
     onDone(result.first, result.second)
     Toast.makeText(context, result.first, Toast.LENGTH_SHORT).show()
+}
+
+/**
+ * Detects whether Wine/Proton binaries are built for glibc or bionic variant
+ * by checking the dynamic linker interpreter in the ELF binary.
+ */
+private fun detectBinaryVariant(installDir: File): String {
+    try {
+        // Check wine64 binary first, fall back to wine
+        val wine64 = File(installDir, "bin/wine64")
+        val wine = File(installDir, "bin/wine")
+        val binaryFile = when {
+            wine64.exists() -> wine64
+            wine.exists() -> wine
+            else -> {
+                android.util.Log.w("WineProtonManager", "No wine binary found in ${installDir.path}")
+                return "unknown"
+            }
+        }
+
+        // Read first 1KB of ELF file to find interpreter
+        val bytes = binaryFile.inputStream().use { stream ->
+            val buffer = ByteArray(1024)
+            val read = stream.read(buffer)
+            buffer.copyOf(read)
+        }
+
+        // Convert to string to search for interpreter path
+        val content = String(bytes, Charsets.ISO_8859_1)
+
+        return when {
+            content.contains("/system/bin/linker") -> "bionic"
+            content.contains("/lib64/ld-linux") || content.contains("/lib/ld-linux") -> "glibc"
+            else -> "unknown"
+        }
+    } catch (e: Exception) {
+        android.util.Log.e("WineProtonManager", "Error detecting binary variant", e)
+        return "unknown"
+    }
 }
 
 @androidx.compose.ui.tooling.preview.Preview
