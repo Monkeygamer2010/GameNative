@@ -195,7 +195,6 @@ fun UnifiedProfileEditorDialog(
             snapshot.element.setY(snapshot.y)
             snapshot.element.setScale(snapshot.scale)
 
-            currentProfile.save()
             inputControlsView?.invalidate()
 
             // Reset flag immediately and update tracking state
@@ -236,7 +235,6 @@ fun UnifiedProfileEditorDialog(
             snapshot.element.setY(snapshot.y)
             snapshot.element.setScale(snapshot.scale)
 
-            currentProfile.save()
             inputControlsView?.invalidate()
 
             // Reset flag immediately and update tracking state
@@ -588,7 +586,6 @@ fun UnifiedProfileEditorDialog(
                                                             .setMessage("Delete this element?")
                                                             .setPositiveButton("Delete") { _, _ ->
                                                                 currentProfile.removeElement(selectedElement!!)
-                                                                currentProfile.save()
                                                                 inputControlsView?.invalidate()
                                                             }
                                                             .setNegativeButton("Cancel", null)
@@ -897,9 +894,8 @@ fun UnifiedProfileEditorDialog(
                                     if (existingProfile != null) {
                                         errorMessage = "A profile with this name already exists"
                                     } else {
-                                        // Update the profile name
+                                        // Update the profile name (will be saved when user clicks Save)
                                         currentProfile.name = newName
-                                        currentProfile.save()
                                         showRenameDialog = false
                                         errorMessage = null
                                         Toast.makeText(
@@ -970,7 +966,6 @@ private fun showAddElementDialog(context: Context, view: InputControlsView) {
             }
 
             profile.addElement(element)
-            profile.save()  // Save the profile so the new element is persisted
             view.invalidate()
         }
         .show()

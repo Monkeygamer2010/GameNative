@@ -26,7 +26,6 @@ import app.gamenative.ui.data.GameDisplayInfo
 import app.gamenative.ui.enums.AppOptionMenuType
 import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.createPinnedShortcut
-import com.winlator.container.Container
 import com.winlator.container.ContainerData
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -484,13 +483,8 @@ abstract class BaseAppScreen {
         var containerData by androidx.compose.runtime.remember {
             androidx.compose.runtime.mutableStateOf(ContainerData())
         }
-        var currentContainer by remember(libraryItem.appId) {
-            mutableStateOf<Container?>(null)
-        }
 
         val onEditContainer: () -> Unit = {
-            val container = ContainerUtils.getOrCreateContainer(context, libraryItem.appId)
-            var containerData = ContainerUtils.toContainerData(container)
             containerData = loadContainerData(context, libraryItem)
             showConfigDialog = true
         }
