@@ -230,12 +230,10 @@ public abstract class ImageFsInstaller {
                         String name = file.getName();
                         // Preserve home directory (user data)
                         if (name.equals("home")) {
-                            Log.d("ImageFsInstaller", "Preserving directory during clearRootDir: home");
                             continue;
                         }
                         // Preserve opt directory but clear its contents selectively
                         if (name.equals("opt")) {
-                            Log.d("ImageFsInstaller", "Selectively clearing opt directory");
                             clearOptDir(file);
                             continue;
                         }
