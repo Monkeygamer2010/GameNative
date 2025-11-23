@@ -183,7 +183,7 @@ public class WineInfo implements Parcelable {
         String type = matcher.group(1);
         String version = matcher.group(2);
         String arch = matcher.group(4);
-        String path = "";
+        String path = null;
 
         // Check if it's a built-in bionic Wine version
         if (wineProfile == null) {
@@ -211,7 +211,7 @@ public class WineInfo implements Parcelable {
             return wineInfo;
         }
 
-        Log.d("WineInfo", "   Returning default WineInfo: type=" + type + ", version=" + version + ", arch=" + arch);
+        Log.d("WineInfo", "   Returning default WineInfo: type=" + type + ", version=" + version + ", arch=" + arch + ", path=" + path);
         return new WineInfo(type, version, arch, path);
     }
 

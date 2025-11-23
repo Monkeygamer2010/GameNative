@@ -1,9 +1,9 @@
 # Proton 10 File Structure Reference
 ## Complete Guide for GameNative & Winlator Compatibility
 
-**Document Version:** 1.0  
-**Date:** November 20, 2025  
-**Subject:** Proton 10.0 ARM64EC File Structure Analysis  
+**Document Version:** 1.0
+**Date:** November 20, 2025
+**Subject:** Proton 10.0 ARM64EC File Structure Analysis
 **Purpose:** Template for future Wine/Proton package conversions
 
 ---
@@ -54,7 +54,8 @@ GameNative/Winlator supports two packaging methods for Wine/Proton distributions
 **SHA256:** `d7c106284c839b7a03ab082b32ca45ff7f88bd3abaea8f1ecc4d6ce134a064aa`
 
 #### Top-Level Structure
-```
+
+```text
 proton-10.0-arm64ec.txz
 ├── bin/                    (17 executables)
 ├── lib/                    (Wine libraries)
@@ -64,7 +65,8 @@ proton-10.0-arm64ec.txz
 #### Detailed Directory Layout
 
 ##### `bin/` - Wine Executables (17 files)
-```
+
+```text
 bin/
 ├── wine                    # Main Wine loader
 ├── wineserver             # Wine server daemon
@@ -85,7 +87,7 @@ bin/
 
 ##### `lib/wine/` - Wine Libraries (1,737 files)
 
-```
+```text
 lib/wine/
 ├── aarch64-unix/          (34 files - Native ARM64 Unix libraries)
 │   ├── advapi32.so
@@ -125,7 +127,7 @@ lib/wine/
 
 ##### `share/wine/` - Resources (6 files + fonts/nls)
 
-```
+```text
 share/wine/
 ├── wine.inf               # Wine initialization file
 ├── fonts/                 # TrueType and FON fonts (100+ files)
@@ -149,7 +151,7 @@ share/wine/
 
 This file contains a complete Wine prefix template (`.wine/` directory) that gets extracted to each container's directory.
 
-```
+```text
 .wine/                             # Wine prefix root
 ├── .update-timestamp              # Installation timestamp
 │
@@ -216,7 +218,7 @@ This file contains a complete Wine prefix template (`.wine/` directory) that get
 
 These are ARM64 Windows DLLs extracted from `lib/wine/aarch64-windows/` for game input support:
 
-```
+```text
 proton10_arm64ec_input_dlls.tzst
 ├── dinput.dll              # DirectInput (legacy input API)
 ├── dinput8.dll             # DirectInput 8 (modern input API)
@@ -241,7 +243,7 @@ proton10_arm64ec_input_dlls.tzst
 
 #### WCP Package Layout
 
-```
+```text
 proton-10.0-arm64ec.wcp (tar.xz archive)
 │
 ├── profile.json            # WCP metadata (287 bytes)
@@ -274,13 +276,16 @@ proton-10.0-arm64ec.wcp (tar.xz archive)
   "versionCode": 2,
   "description": "Proton 10.0 ARM64EC - Windows compatibility layer with improved gaming support",
   "files": [],
-  "wine": {
+  "proton": {
     "binPath": "bin",
     "libPath": "lib",
     "prefixPack": "prefixPack.tzst"
   }
 }
 ```
+
+**Metadata Block Key:**
+Both `"wine"` and `"proton"` keys are supported for Wine/Proton packages. Use `"proton"` for Proton packages and `"wine"` for Wine packages. The loader checks for `"proton"` first, then falls back to `"wine"` for backward compatibility (see `ContentsManager.readProfile()`).
 
 **Field Specifications:**
 
@@ -291,9 +296,9 @@ proton-10.0-arm64ec.wcp (tar.xz archive)
 | `versionCode` | Integer | ✅ | Incremental version number (1, 2, 3...) |
 | `description` | String | ✅ | Human-readable description |
 | `files` | Array | ✅ | Additional files to copy (empty for Wine packages) |
-| `wine.binPath` | String | ✅ | Relative path to `bin/` directory |
-| `wine.libPath` | String | ✅ | Relative path to `lib/` directory |
-| `wine.prefixPack` | String | ✅ | Filename of prefix archive (must be .txz or .tzst) |
+| `wine.binPath` / `proton.binPath` | String | ✅ | Relative path to `bin/` directory |
+| `wine.libPath` / `proton.libPath` | String | ✅ | Relative path to `lib/` directory |
+| `wine.prefixPack` / `proton.prefixPack` | String | ✅ | Filename of prefix archive (must be .txz or .tzst) |
 
 ---
 
@@ -301,15 +306,15 @@ proton-10.0-arm64ec.wcp (tar.xz archive)
 
 ### Original → WCP Transformation
 
-```
+```text
 ORIGINAL FILES                      WCP STRUCTURE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 proton-10.0-arm64ec.txz      ──┐
 ├── bin/                     ──┼──→ bin/
 ├── lib/                     ──┼──→ lib/
 └── share/                   ──┘  └─→ share/
-                                     
-proton-10.0-arm64ec_         ──┐   
+
+proton-10.0-arm64ec_         ──┐
   container_pattern.tzst       │
 └── .wine/                   ──┼──→ prefixPack.tzst
                                │    └── .wine/
@@ -359,7 +364,8 @@ tar --zstd -xf archive.tzst  # if tar supports --zstd
 ### Naming Conventions
 
 #### Wine/Proton Identifier Format
-```
+
+```text
 <type>-<major>.<minor>-<arch>
 
 Examples:
@@ -405,7 +411,7 @@ Examples:
 
 #### Step 2: Place Assets
 
-```
+```text
 app/src/main/assets/
 ├── proton-10.0-arm64ec.txz                    # Git LFS pointer (133 bytes)
 ├── proton-10.0-arm64ec_container_pattern.tzst # 27 MB
@@ -429,6 +435,8 @@ git commit -m "Add Proton 10.0 ARM64EC binaries"
 
 **File:** `app/src/main/java/app/gamenative/ui/screen/xserver/XServerScreen.kt`
 
+
+Note: This functio nis no longer required as they've fixed the issue a newer release, but keeping it here for reference.
 Add extraction function:
 ```kotlin
 private fun extractProton10Arm64ecInputDLLs(context: Context, container: Container) {
@@ -468,12 +476,14 @@ if (firstTimeBoot) {
 #### Installation Paths
 
 WCP files are extracted to:
-```
+
+```text
 /data/data/app.gamenative/files/contents/wine/<version_identifier>-<vercode>/
 ```
 
 **Example for Proton 10.0:**
-```
+
+```text
 /data/data/app.gamenative/files/contents/wine/10.0-arm64ec-02/
 ├── bin/
 ├── lib/
@@ -492,17 +502,17 @@ WCP files are extracted to:
 public void extraContentFile(Uri uri, OnInstallFinishedCallback callback) {
     // 1. Extract WCP to temp directory
     TarCompressorUtils.extract(Type.XZ, context, uri, tmpDir);
-    
+
     // 2. Read and validate profile.json
     ContentProfile profile = readProfile(new File(tmpDir, "profile.json"));
-    
+
     // 3. Validate required files exist
     //    - For Wine: bin/, lib/, prefixPack.txz/tzst
-    
+
     // 4. Move to permanent location
     File installDir = getInstallDir(context, profile);
     FileUtils.move(tmpDir, installDir);
-    
+
     callback.onSucceed(profile);
 }
 ```
@@ -786,17 +796,18 @@ Timber.d("Extracting input DLLs...")  # Add logging
 
 ### External Documentation
 
-- Wine Documentation: https://www.winehq.org/documentation
-- Proton GitHub: https://github.com/ValveSoftware/Proton
-- GameNative Repository: https://github.com/utkarshdalal/GameNative
-- Winlator: https://github.com/brunodev85/winlator
+- [Wine Documentation](https://www.winehq.org/documentation)
+- [Proton GitHub](https://github.com/ValveSoftware/Proton)
+- [GameNative Repository](https://github.com/utkarshdalal/GameNative)
+- [Winlator](https://github.com/brunodev85/winlator)
 
 ---
 
 ## Appendix: Complete File Trees
 
 ### Proton 10.0 ARM64EC TXZ (First 100 files)
-```
+
+```text
 ./
 ./bin/
 ./bin/regsvr32
@@ -844,7 +855,8 @@ Timber.d("Extracting input DLLs...")  # Add logging
 ```
 
 ### Container Pattern TZST (First 50 files)
-```
+
+```text
 .wine/
 .wine/system.reg
 .wine/user.reg
@@ -866,4 +878,4 @@ Timber.d("Extracting input DLLs...")  # Add logging
 
 ---
 
-**Document End**
+## Document End
