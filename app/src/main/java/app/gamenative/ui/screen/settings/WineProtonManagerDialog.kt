@@ -278,7 +278,10 @@ fun WineProtonManagerDialog(open: Boolean, onDismiss: () -> Unit) {
                     latch.countDown()
                 }
                 Timber.tag("WineProtonManagerDialog").d("Waiting for extraction to complete...")
-                latch.await()
+                // 4 minutes worth of extration time should be plenty of time.
+                if (!latch.await(240, TimeUnit.SECONDS)) {
+                    err = Exception("Extraction timed out after 240 seconds")
+                }
                 Timber.tag("WineProtonManagerDialog").d("Extraction wait completed")
                 Triple(profile, failReason, err)
             }
@@ -465,7 +468,9 @@ fun WineProtonManagerDialog(open: Boolean, onDismiss: () -> Unit) {
                         err = e
                         latch.countDown()
                     }
-                    latch.await()
+                if (!latch.await(240, TimeUnit.SECONDS)) {
+                       err = Exception("Installation timed out after 240 seconds")
+                   }
                     Triple(profile, failReason, err)
                 }
 
