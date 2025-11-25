@@ -47,6 +47,8 @@ import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
 
+import app.gamenative.PluviaApp;
+import app.gamenative.events.AndroidEvent;
 import app.gamenative.service.SteamService;
 
 public class BionicProgramLauncherComponent extends GuestProgramLauncherComponent {
@@ -90,6 +92,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             else
                 extractBox64Files();
             if (preUnpack != null) preUnpack.run();
+            PluviaApp.events.emitJava(new AndroidEvent.SetBootingSplashText("Launching game..."));
             pid = execGuestProgram();
             Log.d("BionicProgramLauncherComponent", "Process " + pid + " started");
             SteamService.setGameRunning(true);
@@ -221,6 +224,11 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             envVars.put("EVSHIM_SHM_ID", 1);
         }
         addBox64EnvVars(envVars, enableBox86_64Logs);
+
+        String renderer = GPUInformation.getRenderer(context);
+
+        if (renderer.contains("Mali"))
+            envVars.put("BOX64_MMAP32", "0");
 
         if (envVars.get("BOX64_MMAP32").equals("1") && !wineInfo.isArm64EC())
             envVars.put("WRAPPER_DISABLE_PLACED", "1");
