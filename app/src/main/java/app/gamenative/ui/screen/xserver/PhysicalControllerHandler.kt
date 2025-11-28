@@ -1,5 +1,6 @@
 package app.gamenative.ui.screen.xserver
 
+import android.graphics.PointF
 import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -12,6 +13,8 @@ import com.winlator.inputcontrols.GamepadState
 import com.winlator.math.Mathf
 import com.winlator.winhandler.WinHandler
 import com.winlator.xserver.XServer
+import java.util.Timer
+import java.util.TimerTask
 
 /**
  * Standalone handler for physical controller input that works independently of view visibility.
@@ -23,10 +26,28 @@ class PhysicalControllerHandler(
     private val onOpenNavigationMenu: (() -> Unit)? = null
 ) {
     private val TAG = "gncontrol"
+    private val mouseMoveOffset = PointF(0f, 0f)
+    private var mouseMoveTimer: Timer? = null
 
     fun setProfile(profile: ControlsProfile?) {
         this.profile = profile
         Log.d(TAG, "PhysicalControllerHandler: Profile set to ${profile?.name}")
+
+        // Cancel mouse movement timer if profile is null
+        if (profile == null) {
+            mouseMoveTimer?.cancel()
+            mouseMoveTimer = null
+            mouseMoveOffset.set(0f, 0f)
+        }
+    }
+
+    /**
+     * Clean up resources when handler is destroyed
+     */
+    fun cleanup() {
+        mouseMoveTimer?.cancel()
+        mouseMoveTimer = null
+        mouseMoveOffset.set(0f, 0f)
     }
 
     /**
@@ -85,10 +106,36 @@ class PhysicalControllerHandler(
     }
 
     /**
+     * Create a timer for continuous mouse movement injection.
+     * Runs at 60 FPS, injecting mouse deltas based on mouseMoveOffset.
+     */
+    private fun createMouseMoveTimer() {
+        if (profile != null && mouseMoveTimer == null) {
+            mouseMoveTimer = Timer()
+            mouseMoveTimer?.schedule(object : TimerTask() {
+                override fun run() {
+                    // Skip injection if movement is below 8% deadzone to save CPU cycles
+                    val magnitude = Math.sqrt((mouseMoveOffset.x * mouseMoveOffset.x + mouseMoveOffset.y * mouseMoveOffset.y).toDouble())
+                    if (magnitude < 0.08) return
+
+                    // Look up cursor speed dynamically so it updates when profile changes
+                    val cursorSpeed = profile?.cursorSpeed ?: 1f
+                    val deltaX = (mouseMoveOffset.x * 10 * cursorSpeed).toInt()
+                    val deltaY = (mouseMoveOffset.y * 10 * cursorSpeed).toInt()
+                    xServer?.injectPointerMoveDelta(deltaX, deltaY)
+                }
+            }, 0, 1000 / 60)
+        }
+    }
+
+    /**
      * Process analog stick input and apply bindings.
      * Extracted from InputControlsView.processJoystickInput()
      */
     private fun processJoystickInput(controller: ExternalController) {
+        // Reset mouse movement offset at the start - contributions will be added during processing
+        mouseMoveOffset.set(0f, 0f)
+
         val axes = intArrayOf(
             MotionEvent.AXIS_X,
             MotionEvent.AXIS_Y,
@@ -109,9 +156,8 @@ class PhysicalControllerHandler(
         for (i in axes.indices) {
             var controllerBinding: ExternalControllerBinding?
             if (Math.abs(values[i]) > ControlElement.STICK_DEAD_ZONE) {
-                controllerBinding = controller.getControllerBinding(
-                    ExternalControllerBinding.getKeyCodeForAxis(axes[i], Mathf.sign(values[i]))
-                )
+                val keyCode = ExternalControllerBinding.getKeyCodeForAxis(axes[i], Mathf.sign(values[i]))
+                controllerBinding = controller.getControllerBinding(keyCode)
                 if (controllerBinding != null) {
                     handleInputEvent(controllerBinding.binding, true, values[i])
                 }
@@ -193,8 +239,24 @@ class PhysicalControllerHandler(
                     Log.d(TAG, "Opening navigation menu from controller binding")
                     onOpenNavigationMenu?.invoke()
                 }
+            } else if (binding == Binding.MOUSE_MOVE_LEFT || binding == Binding.MOUSE_MOVE_RIGHT) {
+                // Handle horizontal mouse movement - ADD contribution from this input
+                if (isActionDown) {
+                    val contribution = if (offset != 0f) offset else if (binding == Binding.MOUSE_MOVE_LEFT) -1f else 1f
+                    mouseMoveOffset.x += contribution
+                    createMouseMoveTimer()
+                }
+                // Don't reset when isActionDown=false - mouseMoveOffset is reset at the start of processJoystickInput
+            } else if (binding == Binding.MOUSE_MOVE_DOWN || binding == Binding.MOUSE_MOVE_UP) {
+                // Handle vertical mouse movement - ADD contribution from this input
+                if (isActionDown) {
+                    val contribution = if (offset != 0f) offset else if (binding == Binding.MOUSE_MOVE_UP) -1f else 1f
+                    mouseMoveOffset.y += contribution
+                    createMouseMoveTimer()
+                }
+                // Don't reset when isActionDown=false - mouseMoveOffset is reset at the start of processJoystickInput
             } else {
-                // For keyboard/mouse bindings, inject into XServer
+                // For keyboard/mouse button bindings, inject into XServer
                 val pointerButton = binding.pointerButton
                 if (isActionDown) {
                     if (pointerButton != null) {

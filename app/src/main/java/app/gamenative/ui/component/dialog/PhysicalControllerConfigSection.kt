@@ -27,6 +27,12 @@ import com.winlator.inputcontrols.ExternalController
 import com.winlator.inputcontrols.ExternalControllerBinding
 
 /**
+ * Data classes for controller configuration
+ */
+private data class ButtonConfig(val label: String, val keyCode: Int)
+private data class AnalogConfig(val label: String, val axis: Int, val sign: Int)
+
+/**
  * Physical Controller Configuration with two-column categorized layout
  *
  * Shows controller bindings organized by categories (Buttons, Left Stick, Right Stick, D-Pad)
@@ -115,9 +121,6 @@ internal fun PhysicalControllerConfigSection(
     var refreshKey by remember { mutableIntStateOf(0) }
 
     // Pre-compute all button configurations
-    data class ButtonConfig(val label: String, val keyCode: Int)
-    data class AnalogConfig(val label: String, val axis: Int, val sign: Int)
-
     // Face buttons
     val faceButtons = remember {
         listOf(
@@ -444,7 +447,17 @@ internal fun PhysicalControllerConfigSection(
                                     }
                                 }
                                 4 -> {
-                                    // Left Stick
+                                    // Left Stick - Quick Presets
+                                    PhysicalControlPresets(
+                                        presetType = PhysicalPresetTarget.LEFT_STICK,
+                                        leftStickAxes = leftStickAxes,
+                                        rightStickAxes = rightStickAxes,
+                                        dpadButtons = dpadButtons,
+                                        workingBindings = workingBindings,
+                                        onPresetsApplied = { refreshKey++ }
+                                    )
+
+                                    // Left Stick bindings
                                     leftStickAxes.forEach { analogConfig ->
                                         val keyCode = ExternalControllerBinding.getKeyCodeForAxis(
                                             analogConfig.axis,
@@ -461,7 +474,17 @@ internal fun PhysicalControllerConfigSection(
                                     }
                                 }
                                 5 -> {
-                                    // Right Stick
+                                    // Right Stick - Quick Presets
+                                    PhysicalControlPresets(
+                                        presetType = PhysicalPresetTarget.RIGHT_STICK,
+                                        leftStickAxes = leftStickAxes,
+                                        rightStickAxes = rightStickAxes,
+                                        dpadButtons = dpadButtons,
+                                        workingBindings = workingBindings,
+                                        onPresetsApplied = { refreshKey++ }
+                                    )
+
+                                    // Right Stick bindings
                                     rightStickAxes.forEach { analogConfig ->
                                         val keyCode = ExternalControllerBinding.getKeyCodeForAxis(
                                             analogConfig.axis,
@@ -478,7 +501,17 @@ internal fun PhysicalControllerConfigSection(
                                     }
                                 }
                                 6 -> {
-                                    // D-Pad
+                                    // D-Pad - Quick Presets
+                                    PhysicalControlPresets(
+                                        presetType = PhysicalPresetTarget.DPAD,
+                                        leftStickAxes = leftStickAxes,
+                                        rightStickAxes = rightStickAxes,
+                                        dpadButtons = dpadButtons,
+                                        workingBindings = workingBindings,
+                                        onPresetsApplied = { refreshKey++ }
+                                    )
+
+                                    // D-Pad bindings
                                     dpadButtons.forEach { buttonConfig ->
                                         ControllerBindingItem(
                                             label = buttonConfig.label,
@@ -583,6 +616,258 @@ private fun ControllerBindingItem(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+        }
+    }
+}
+
+/**
+ * Quick preset buttons for physical controller stick/dpad bindings
+ */
+@Composable
+private fun PhysicalControlPresets(
+    presetType: PhysicalPresetTarget,
+    leftStickAxes: List<Any>,
+    rightStickAxes: List<Any>,
+    dpadButtons: List<Any>,
+    workingBindings: MutableMap<Int, com.winlator.inputcontrols.Binding?>,
+    onPresetsApplied: () -> Unit = {}
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = stringResource(R.string.quick_presets),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+
+            // Keyboard/Mouse presets
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        applyPhysicalPreset(
+                            presetType,
+                            PhysicalPresetBinding.WASD,
+                            leftStickAxes,
+                            rightStickAxes,
+                            dpadButtons,
+                            workingBindings
+                        )
+                        onPresetsApplied()
+                    },
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
+                ) {
+                    Text(stringResource(R.string.preset_wasd), style = MaterialTheme.typography.labelSmall)
+                }
+                OutlinedButton(
+                    onClick = {
+                        applyPhysicalPreset(
+                            presetType,
+                            PhysicalPresetBinding.ARROW_KEYS,
+                            leftStickAxes,
+                            rightStickAxes,
+                            dpadButtons,
+                            workingBindings
+                        )
+                        onPresetsApplied()
+                    },
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
+                ) {
+                    Text(stringResource(R.string.preset_arrows), style = MaterialTheme.typography.labelSmall)
+                }
+                OutlinedButton(
+                    onClick = {
+                        applyPhysicalPreset(
+                            presetType,
+                            PhysicalPresetBinding.MOUSE_MOVE,
+                            leftStickAxes,
+                            rightStickAxes,
+                            dpadButtons,
+                            workingBindings
+                        )
+                        onPresetsApplied()
+                    },
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
+                ) {
+                    Text(stringResource(R.string.preset_mouse), style = MaterialTheme.typography.labelSmall)
+                }
+            }
+
+            // Gamepad presets
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        applyPhysicalPreset(
+                            presetType,
+                            PhysicalPresetBinding.DPAD,
+                            leftStickAxes,
+                            rightStickAxes,
+                            dpadButtons,
+                            workingBindings
+                        )
+                        onPresetsApplied()
+                    },
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
+                ) {
+                    Text(stringResource(R.string.preset_dpad), style = MaterialTheme.typography.labelSmall)
+                }
+                OutlinedButton(
+                    onClick = {
+                        applyPhysicalPreset(
+                            presetType,
+                            PhysicalPresetBinding.LEFT_STICK,
+                            leftStickAxes,
+                            rightStickAxes,
+                            dpadButtons,
+                            workingBindings
+                        )
+                        onPresetsApplied()
+                    },
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
+                ) {
+                    Text(stringResource(R.string.preset_left_stick), style = MaterialTheme.typography.labelSmall)
+                }
+                OutlinedButton(
+                    onClick = {
+                        applyPhysicalPreset(
+                            presetType,
+                            PhysicalPresetBinding.RIGHT_STICK,
+                            leftStickAxes,
+                            rightStickAxes,
+                            dpadButtons,
+                            workingBindings
+                        )
+                        onPresetsApplied()
+                    },
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
+                ) {
+                    Text(stringResource(R.string.preset_right_stick), style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Target for physical controller presets
+ */
+private enum class PhysicalPresetTarget {
+    LEFT_STICK, RIGHT_STICK, DPAD
+}
+
+/**
+ * Binding presets for physical controller inputs
+ */
+private enum class PhysicalPresetBinding {
+    WASD, ARROW_KEYS, MOUSE_MOVE, DPAD, LEFT_STICK, RIGHT_STICK
+}
+
+/**
+ * Apply a preset binding to physical controller inputs
+ */
+private fun applyPhysicalPreset(
+    target: PhysicalPresetTarget,
+    preset: PhysicalPresetBinding,
+    leftStickAxes: List<Any>,
+    rightStickAxes: List<Any>,
+    dpadButtons: List<Any>,
+    workingBindings: MutableMap<Int, com.winlator.inputcontrols.Binding?>
+) {
+    // Define bindings for each preset (Up, Down, Left, Right order for sticks; Up, Down, Left, Right for dpad buttons)
+    val bindings = when (preset) {
+        PhysicalPresetBinding.WASD -> listOf(
+            com.winlator.inputcontrols.Binding.KEY_W,
+            com.winlator.inputcontrols.Binding.KEY_S,
+            com.winlator.inputcontrols.Binding.KEY_A,
+            com.winlator.inputcontrols.Binding.KEY_D
+        )
+        PhysicalPresetBinding.ARROW_KEYS -> listOf(
+            com.winlator.inputcontrols.Binding.KEY_UP,
+            com.winlator.inputcontrols.Binding.KEY_DOWN,
+            com.winlator.inputcontrols.Binding.KEY_LEFT,
+            com.winlator.inputcontrols.Binding.KEY_RIGHT
+        )
+        PhysicalPresetBinding.MOUSE_MOVE -> listOf(
+            com.winlator.inputcontrols.Binding.MOUSE_MOVE_UP,
+            com.winlator.inputcontrols.Binding.MOUSE_MOVE_DOWN,
+            com.winlator.inputcontrols.Binding.MOUSE_MOVE_LEFT,
+            com.winlator.inputcontrols.Binding.MOUSE_MOVE_RIGHT
+        )
+        PhysicalPresetBinding.DPAD -> listOf(
+            com.winlator.inputcontrols.Binding.GAMEPAD_DPAD_UP,
+            com.winlator.inputcontrols.Binding.GAMEPAD_DPAD_DOWN,
+            com.winlator.inputcontrols.Binding.GAMEPAD_DPAD_LEFT,
+            com.winlator.inputcontrols.Binding.GAMEPAD_DPAD_RIGHT
+        )
+        PhysicalPresetBinding.LEFT_STICK -> listOf(
+            com.winlator.inputcontrols.Binding.GAMEPAD_LEFT_THUMB_UP,
+            com.winlator.inputcontrols.Binding.GAMEPAD_LEFT_THUMB_DOWN,
+            com.winlator.inputcontrols.Binding.GAMEPAD_LEFT_THUMB_LEFT,
+            com.winlator.inputcontrols.Binding.GAMEPAD_LEFT_THUMB_RIGHT
+        )
+        PhysicalPresetBinding.RIGHT_STICK -> listOf(
+            com.winlator.inputcontrols.Binding.GAMEPAD_RIGHT_THUMB_UP,
+            com.winlator.inputcontrols.Binding.GAMEPAD_RIGHT_THUMB_DOWN,
+            com.winlator.inputcontrols.Binding.GAMEPAD_RIGHT_THUMB_LEFT,
+            com.winlator.inputcontrols.Binding.GAMEPAD_RIGHT_THUMB_RIGHT
+        )
+    }
+
+    // Get keyCodes based on target
+    val keyCodes = when (target) {
+        PhysicalPresetTarget.LEFT_STICK -> {
+            // Up, Down, Left, Right
+            leftStickAxes.map { config ->
+                val analogConfig = config as? AnalogConfig
+                if (analogConfig != null) {
+                    ExternalControllerBinding.getKeyCodeForAxis(analogConfig.axis, analogConfig.sign.toByte())
+                } else 0
+            }
+        }
+        PhysicalPresetTarget.RIGHT_STICK -> {
+            // Up, Down, Left, Right
+            rightStickAxes.map { config ->
+                val analogConfig = config as? AnalogConfig
+                if (analogConfig != null) {
+                    ExternalControllerBinding.getKeyCodeForAxis(analogConfig.axis, analogConfig.sign.toByte())
+                } else 0
+            }
+        }
+        PhysicalPresetTarget.DPAD -> {
+            // Up, Down, Left, Right
+            dpadButtons.map { config ->
+                val buttonConfig = config as? ButtonConfig
+                buttonConfig?.keyCode ?: 0
+            }
+        }
+    }
+
+    // Apply bindings
+    keyCodes.forEachIndexed { index, keyCode ->
+        if (keyCode != 0 && index < bindings.size) {
+            workingBindings[keyCode] = bindings[index]
         }
     }
 }

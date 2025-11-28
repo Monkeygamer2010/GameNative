@@ -219,6 +219,7 @@ fun XServerScreen(
     // Clean up physical controller handler on disposal
     DisposableEffect(Unit) {
         onDispose {
+            physicalControllerHandler?.cleanup()
             physicalControllerHandler = null
         }
     }
