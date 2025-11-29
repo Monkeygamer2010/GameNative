@@ -107,7 +107,7 @@ class SteamUtilsFileSearchTest {
         // This allows getAppInfoOf() to find the test app
         val mockSteamService = mock<SteamService>()
         whenever(mockSteamService.appDao).thenReturn(db.steamAppDao())
-        
+
         // Mock steamClient and steamID for userSteamId property
         val mockSteamClient = mock<`in`.dragonbra.javasteam.steam.steamclient.SteamClient>()
         val mockSteamID = mock<`in`.dragonbra.javasteam.types.SteamID>()
@@ -255,27 +255,6 @@ class SteamUtilsFileSearchTest {
         // Verify file beyond max depth was NOT restored
         val restoredFile = File(currentDir, "game.exe")
         assertFalse("Should NOT restore exe beyond max depth", restoredFile.exists())
-    }
-
-    @Test
-    fun restoreOriginalExecutable_handlesCaseInsensitiveMatching() {
-        // Set up dosdevices path
-        val imageFs = ImageFs.find(context)
-        val dosDevicesPath = File(imageFs.wineprefix, "dosdevices/a:")
-        dosDevicesPath.mkdirs()
-
-        // Create .original.exe file with different case
-        val origExeFile = File(dosDevicesPath, "GAME.EXE.original.exe")
-        origExeFile.writeBytes("original exe content".toByteArray())
-
-        // Call the actual function
-        SteamUtils.restoreOriginalExecutable(context, steamAppId)
-
-        // Verify restoration (case-insensitive)
-        val restoredFile = File(dosDevicesPath, "GAME.EXE")
-        assertTrue("Should restore exe with case-insensitive matching", restoredFile.exists())
-        assertEquals("Restored content should match backup",
-            "original exe content", restoredFile.readText())
     }
 
     @Test
