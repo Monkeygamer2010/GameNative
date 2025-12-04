@@ -10,8 +10,10 @@ import app.gamenative.PrefManager
 import app.gamenative.PluviaApp
 import app.gamenative.data.LibraryItem
 import app.gamenative.data.SteamApp
+import app.gamenative.data.GOGGame
 import app.gamenative.data.GameSource
 import app.gamenative.db.dao.SteamAppDao
+import app.gamenative.db.dao.GOGGameDao
 import app.gamenative.service.DownloadService
 import app.gamenative.service.SteamService
 import app.gamenative.ui.data.LibraryState
@@ -43,6 +45,7 @@ import kotlin.math.min
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
     private val steamAppDao: SteamAppDao,
+    private val gogGameDao: GOGGameDao,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -68,6 +71,7 @@ class LibraryViewModel @Inject constructor(
 
     // Complete and unfiltered app list
     private var appList: List<SteamApp> = emptyList()
+    private var gogGameList: List<GOGGame> = emptyList()
 
     // Track if this is the first load to apply minimum load time
     private var isFirstLoad = true
@@ -100,6 +104,18 @@ class LibraryViewModel @Inject constructor(
                     // Don't filter if it's no change
                     appList = apps
 
+                    onFilterApps(paginationCurrentPage)
+                }
+            }
+        }
+
+        // Collect GOG games
+        viewModelScope.launch(Dispatchers.IO) {
+            gogGameDao.getAll().collect { games ->
+                Timber.tag("LibraryViewModel").d("Collecting ${games.size} GOG games")
+
+                if (gogGameList.size != games.size) {
+                    gogGameList = games
                     onFilterApps(paginationCurrentPage)
                 }
             }
@@ -140,8 +156,9 @@ class LibraryViewModel @Inject constructor(
                 _state.update { it.copy(showCustomGamesInLibrary = newValue) }
             }
             GameSource.GOG -> {
-                // TODO: Add GOG library toggle preference
-                // For now, do nothing - GOG games are always shown
+                val newValue = !current.showGOGInLibrary
+                PrefManager.showGOGInLibrary = newValue
+                _state.update { it.copy(showGOGInLibrary = newValue) }
             }
         }
         onFilterApps(paginationCurrentPage)
@@ -304,22 +321,59 @@ class LibraryViewModel @Inject constructor(
             }
             val customEntries = customGameItems.map { LibraryEntry(it, true) }
 
+            // Filter GOG games
+            val filteredGOGGames = gogGameList
+                .asSequence()
+                .filter { game ->
+                    if (currentState.searchQuery.isNotEmpty()) {
+                        game.title.contains(currentState.searchQuery, ignoreCase = true)
+                    } else {
+                        true
+                    }
+                }
+                .filter { game ->
+                    if (currentState.appInfoSortType.contains(AppFilter.INSTALLED)) {
+                        game.isInstalled
+                    } else {
+                        true
+                    }
+                }
+                .sortedBy { it.title.lowercase() }
+                .toList()
+
+            val gogEntries = filteredGOGGames.map { game ->
+                LibraryEntry(
+                    item = LibraryItem(
+                        index = 0,
+                        appId = "${GameSource.GOG.name}_${game.id}",
+                        name = game.title,
+                        iconHash = game.iconUrl,
+                        isShared = false,
+                        gameSource = GameSource.GOG,
+                    ),
+                    isInstalled = game.isInstalled,
+                )
+            }
+
             // Save game counts for skeleton loaders (only when not searching, to get accurate counts)
             // This needs to happen before filtering by source, so we save the total counts
             if (currentState.searchQuery.isEmpty()) {
                 PrefManager.customGamesCount = customGameItems.size
                 PrefManager.steamGamesCount = filteredSteamApps.size
-                Timber.tag("LibraryViewModel").d("Saved counts - Custom: ${customGameItems.size}, Steam: ${filteredSteamApps.size}")
+                PrefManager.gogGamesCount = filteredGOGGames.size
+                Timber.tag("LibraryViewModel").d("Saved counts - Custom: ${customGameItems.size}, Steam: ${filteredSteamApps.size}, GOG: ${filteredGOGGames.size}")
             }
 
             // Apply App Source filters
             val includeSteam = _state.value.showSteamInLibrary
             val includeOpen = _state.value.showCustomGamesInLibrary
+            val includeGOG = _state.value.showGOGInLibrary
 
-            // Combine both lists
+            // Combine all lists
             val combined = buildList<LibraryEntry> {
                 if (includeSteam) addAll(steamEntries)
                 if (includeOpen) addAll(customEntries)
+                if (includeGOG) addAll(gogEntries)
             }.sortedWith(
                 // Always sort by installed status first (installed games at top), then alphabetically within each group
                 compareBy<LibraryEntry> { entry ->

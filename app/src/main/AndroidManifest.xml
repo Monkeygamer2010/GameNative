@@ -57,19 +57,20 @@
                 <category android:name="android.intent.category.BROWSABLE" />
 
                 <data
-                    android:scheme="gamenative"
-                    android:host="gog-callback" />
+                    android:scheme="https"
+                    android:host="embed.gog.com"
+                    android:pathPrefix="/on_login_success" />
             </intent-filter>
             <intent-filter>
                 <action android:name="app.gamenative.LAUNCH_GAME" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
-            
+
             <!--Allows app window to be resized on Oculus Quest VR headsets-->
             <meta-data
                 android:name="com.oculus.vrshell.supports_free_resizing"
                 android:value="true" />
-            
+
         </activity>
         <!-- Launcher icon aliases to allow switching app icon at runtime -->
         <activity-alias
@@ -83,6 +84,16 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- This is currently broke as we need to redo how suspend/pause works-->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="embed.gog.com"
+                    android:pathPrefix="/on_login_success" />
+            </intent-filter>
         </activity-alias>
         <activity-alias
             android:name=".MainActivityAliasAlt"
@@ -95,13 +106,22 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="embed.gog.com"
+                    android:pathPrefix="/on_login_success" />
+            </intent-filter>
         </activity-alias>
         <service
             android:name=".service.SteamService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
-        
+
         <!-- FileProvider for secure file sharing (for APK installation) -->
         <provider
             android:name="androidx.core.content.FileProvider"

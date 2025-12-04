@@ -66,6 +66,8 @@ import kotlinx.coroutines.launch
 import app.gamenative.utils.LocaleHelper
 import app.gamenative.ui.component.dialog.GOGLoginDialog
 import app.gamenative.service.gog.GOGService
+import dagger.hilt.android.EntryPointAccessors
+import app.gamenative.di.DatabaseModule
 
 @Composable
 fun SettingsGroupInterface(
@@ -75,6 +77,16 @@ fun SettingsGroupInterface(
     onPaletteStyle: (PaletteStyle) -> Unit,
 ) {
     val context = LocalContext.current
+    
+    // Get GOGGameDao from Hilt
+    val gogGameDao = remember {
+        val appContext = context.applicationContext
+        val entryPoint = EntryPointAccessors.fromApplication(
+            appContext,
+            DatabaseEntryPoint::class.java
+        )
+        entryPoint.gogGameDao()
+    }
 
     var openWebLinks by rememberSaveable { mutableStateOf(PrefManager.openWebLinksExternally) }
 
@@ -124,32 +136,80 @@ fun SettingsGroupInterface(
     var gogLoginLoading by rememberSaveable { mutableStateOf(false) }
     var gogLoginError by rememberSaveable { mutableStateOf<String?>(null) }
     var gogLoginSuccess by rememberSaveable { mutableStateOf(false) }
+
+    // GOG library sync state
+    var gogLibrarySyncing by rememberSaveable { mutableStateOf(false) }
+    var gogLibrarySyncError by rememberSaveable { mutableStateOf<String?>(null) }
+    var gogLibrarySyncSuccess by rememberSaveable { mutableStateOf(false) }
+    var gogLibraryGameCount by rememberSaveable { mutableStateOf(0) }
+
     val coroutineScope = rememberCoroutineScope()
 
     // Listen for GOG OAuth callback
     LaunchedEffect(Unit) {
+        timber.log.Timber.d("[SettingsGOG]: Setting up GOG auth code event listener")
         app.gamenative.PluviaApp.events.on<app.gamenative.events.AndroidEvent.GOGAuthCodeReceived, Unit> { event ->
-            timber.log.Timber.d("Received GOG auth code from deep link: ${event.authCode.take(20)}...")
+            timber.log.Timber.i("[SettingsGOG]: ✓ Received GOG auth code event! Code: ${event.authCode.take(20)}...")
             gogLoginLoading = true
             gogLoginError = null
 
             coroutineScope.launch {
                 try {
+                    timber.log.Timber.d("[SettingsGOG]: Starting authentication...")
                     val authConfigPath = "${context.filesDir}/gog_auth.json"
                     val result = app.gamenative.service.gog.GOGService.authenticateWithCode(authConfigPath, event.authCode)
-                    gogLoginLoading = false
+
                     if (result.isSuccess) {
+                        timber.log.Timber.i("[SettingsGOG]: ✓ Authentication successful!")
+
+                        // Fetch the user's GOG library
+                        timber.log.Timber.i("[SettingsGOG]: Fetching GOG library...")
+                        val libraryResult = app.gamenative.service.gog.GOGService.listGames(context)
+
+                        if (libraryResult.isSuccess) {
+                            val games = libraryResult.getOrNull() ?: emptyList()
+                            timber.log.Timber.i("[SettingsGOG]: ✓ Fetched ${games.size} games from GOG library")
+
+                            // Save games to database
+                            try {
+                                withContext(Dispatchers.IO) {
+                                    gogGameDao.upsertPreservingInstallStatus(games)
+                                }
+                                timber.log.Timber.i("[SettingsGOG]: ✓ Saved ${games.size} games to database")
+                            } catch (e: Exception) {
+                                timber.log.Timber.e(e, "[SettingsGOG]: Failed to save games to database")
+                            }
+
+                            // Log first few games
+                            games.take(5).forEach { game ->
+                                timber.log.Timber.d("[SettingsGOG]:   - ${game.title} (${game.id})")
+                            }
+                            if (games.size > 5) {
+                                timber.log.Timber.d("[SettingsGOG]:   ... and ${games.size - 5} more")
+                            }
+                        } else {
+                            val error = libraryResult.exceptionOrNull()?.message ?: "Failed to fetch library"
+                            timber.log.Timber.w("[SettingsGOG]: Failed to fetch library: $error")
+                            // Don't fail authentication if library fetch fails
+                        }
+
+                        gogLoginLoading = false
                         gogLoginSuccess = true
                         openGOGLoginDialog = false
                     } else {
-                        gogLoginError = result.exceptionOrNull()?.message ?: "Authentication failed"
+                        val error = result.exceptionOrNull()?.message ?: "Authentication failed"
+                        timber.log.Timber.e("[SettingsGOG]: Authentication failed: $error")
+                        gogLoginLoading = false
+                        gogLoginError = error
                     }
                 } catch (e: Exception) {
+                    timber.log.Timber.e(e, "[SettingsGOG]: Authentication exception: ${e.message}")
                     gogLoginLoading = false
                     gogLoginError = e.message ?: "Authentication failed"
                 }
             }
         }
+        timber.log.Timber.d("[SettingsGOG]: GOG auth code event listener registered")
     }
 
     SettingsGroup(title = { Text(text = stringResource(R.string.settings_interface_title)) }) {
@@ -230,6 +290,70 @@ fun SettingsGroupInterface(
                 openGOGLoginDialog = true
                 gogLoginError = null
                 gogLoginSuccess = false
+            }
+        )
+
+        SettingsMenuLink(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = "Sync GOG Library") },
+            subtitle = {
+                Text(
+                    text = when {
+                        gogLibrarySyncing -> "Syncing..."
+                        gogLibrarySyncError != null -> "Error: ${gogLibrarySyncError}"
+                        gogLibrarySyncSuccess -> "✓ Synced ${gogLibraryGameCount} games"
+                        else -> "Fetch your GOG games library"
+                    }
+                )
+            },
+            enabled = !gogLibrarySyncing,
+            onClick = {
+                gogLibrarySyncing = true
+                gogLibrarySyncError = null
+                gogLibrarySyncSuccess = false
+
+                coroutineScope.launch {
+                    try {
+                        timber.log.Timber.i("[SettingsGOG]: Syncing GOG library...")
+                        val libraryResult = app.gamenative.service.gog.GOGService.listGames(context)
+
+                        if (libraryResult.isSuccess) {
+                            val games = libraryResult.getOrNull() ?: emptyList()
+                            gogLibraryGameCount = games.size
+                            timber.log.Timber.i("[SettingsGOG]: ✓ Synced ${games.size} games from GOG library")
+
+                            // Save games to database
+                            try {
+                                withContext(Dispatchers.IO) {
+                                    gogGameDao.upsertPreservingInstallStatus(games)
+                                }
+                                timber.log.Timber.i("[SettingsGOG]: ✓ Saved ${games.size} games to database")
+                            } catch (e: Exception) {
+                                timber.log.Timber.e(e, "[SettingsGOG]: Failed to save games to database")
+                            }
+
+                            // Log first few games
+                            games.take(5).forEach { game ->
+                                timber.log.Timber.d("[SettingsGOG]:   - ${game.title} (${game.id})")
+                            }
+                            if (games.size > 5) {
+                                timber.log.Timber.d("[SettingsGOG]:   ... and ${games.size - 5} more")
+                            }
+
+                            gogLibrarySyncing = false
+                            gogLibrarySyncSuccess = true
+                        } else {
+                            val error = libraryResult.exceptionOrNull()?.message ?: "Failed to sync library"
+                            timber.log.Timber.e("[SettingsGOG]: Library sync failed: $error")
+                            gogLibrarySyncing = false
+                            gogLibrarySyncError = error
+                        }
+                    } catch (e: Exception) {
+                        timber.log.Timber.e(e, "[SettingsGOG]: Library sync exception: ${e.message}")
+                        gogLibrarySyncing = false
+                        gogLibrarySyncError = e.message ?: "Sync failed"
+                    }
+                }
             }
         )
     }
@@ -518,16 +642,43 @@ fun SettingsGroupInterface(
             gogLoginError = null
             coroutineScope.launch {
                 try {
+                    timber.log.Timber.d("[SettingsGOG]: Starting manual authentication...")
                     val authConfigPath = "${context.filesDir}/gog_auth.json"
                     val result = GOGService.authenticateWithCode(authConfigPath, authCode)
-                    gogLoginLoading = false
+
                     if (result.isSuccess) {
+                        timber.log.Timber.i("[SettingsGOG]: ✓ Manual authentication successful!")
+
+                        // Fetch the user's GOG library
+                        timber.log.Timber.i("[SettingsGOG]: Fetching GOG library...")
+                        val libraryResult = GOGService.listGames(context)
+
+                        if (libraryResult.isSuccess) {
+                            val games = libraryResult.getOrNull() ?: emptyList()
+                            timber.log.Timber.i("[SettingsGOG]: ✓ Fetched ${games.size} games from GOG library")
+
+                            // Log first 5 games
+                            games.take(5).forEach { game ->
+                                timber.log.Timber.d("[SettingsGOG]:   - ${game.title} (${game.id})")
+                            }
+                            if (games.size > 5) {
+                                timber.log.Timber.d("[SettingsGOG]:   ... and ${games.size - 5} more")
+                            }
+                        } else {
+                            val error = libraryResult.exceptionOrNull()?.message ?: "Failed to fetch library"
+                            timber.log.Timber.w("[SettingsGOG]: Failed to fetch library: $error")
+                            // Don't fail authentication if library fetch fails
+                        }
+
+                        gogLoginLoading = false
                         gogLoginSuccess = true
                         openGOGLoginDialog = false
                     } else {
+                        gogLoginLoading = false
                         gogLoginError = result.exceptionOrNull()?.message ?: "Authentication failed"
                     }
                 } catch (e: Exception) {
+                    timber.log.Timber.e(e, "[SettingsGOG]: Manual authentication exception: ${e.message}")
                     gogLoginLoading = false
                     gogLoginError = e.message ?: "Authentication failed"
                 }
@@ -604,4 +755,13 @@ private fun Preview_SettingsScreen() {
             onPaletteStyle = { },
         )
     }
+}
+
+/**
+ * Hilt EntryPoint to access DAOs from Composables
+ */
+@dagger.hilt.EntryPoint
+@dagger.hilt.InstallIn(dagger.hilt.components.SingletonComponent::class)
+interface DatabaseEntryPoint {
+    fun gogGameDao(): app.gamenative.db.dao.GOGGameDao
 }

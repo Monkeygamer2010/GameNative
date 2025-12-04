@@ -18,14 +18,24 @@ class ApiHandler:
         self.session.headers = {
             'User-Agent': f'gogdl/1.0.0 (Android GameNative)'
         }
-        credentials = self.auth_manager.get_credentials()
-        if credentials:
-            token = credentials["access_token"]
-            self.session.headers["Authorization"] = f"Bearer {token}"
+        self._update_auth_header()
         self.owned = []
 
         self.endpoints = dict()  # Map of secure link endpoints
         self.working_on_ids = list()  # List of products we are waiting for to complete getting the secure link
+
+    def _update_auth_header(self):
+        """Update authorization header with fresh token"""
+        credentials = self.auth_manager.get_credentials()
+        if credentials:
+            token = credentials.get("access_token")
+            if token:
+                self.session.headers["Authorization"] = f"Bearer {token}"
+                self.logger.debug(f"Authorization header updated with token: {token[:20]}...")
+            else:
+                self.logger.warning("No access_token found in credentials")
+        else:
+            self.logger.warning("No credentials available")
 
     def get_item_data(self, id, expanded=None):
         if expanded is None:
@@ -52,12 +62,21 @@ class ApiHandler:
             self.logger.error(f"Request failed {response}")
 
     def get_user_data(self):
-        url = f'{constants.GOG_API}/user/data/games'
+        # Refresh auth header before making request
+        self._update_auth_header()
+        
+        # Try the embed endpoint which is more reliable for getting owned games
+        url = f'{constants.GOG_EMBED}/user/data/games'
+        self.logger.info(f"Fetching user data from: {url}")
         response = self.session.get(url)
+        self.logger.debug(f"Response status: {response.status_code}")
         if response.ok:
-            return response.json()
+            data = response.json()
+            self.logger.debug(f"User data keys: {list(data.keys())}")
+            return data
         else:
-            self.logger.error(f"Request failed {response}")
+            self.logger.error(f"Request failed with status {response.status_code}: {response.text[:200]}")
+            return None
 
     def get_builds(self, product_id, platform):
         url = f'{constants.GOG_CONTENT_SYSTEM}/products/{product_id}/os/{platform}/builds?generation=2'

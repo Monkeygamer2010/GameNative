@@ -41,6 +41,7 @@ fun LibraryBottomSheet(
     onViewChanged: (PaneType) -> Unit,
     showSteam: Boolean,
     showCustomGames: Boolean,
+    showGOG: Boolean,
     onSourceToggle: (app.gamenative.data.GameSource) -> Unit,
 ) {
     Column(
@@ -102,6 +103,12 @@ fun LibraryBottomSheet(
                 selected = showCustomGames,
                 leadingIcon = { Icon(imageVector = Icons.Filled.CustomGame, contentDescription = null) },
             )
+            FlowFilterChip(
+                onClick = { onSourceToggle(GameSource.GOG) },
+                label = { Text(text = "GOG") },
+                selected = showGOG,
+                leadingIcon = { Icon(imageVector = Icons.Filled.CustomGame, contentDescription = null) }, // TODO: Add GOG icon
+            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -152,6 +159,7 @@ private fun Preview_LibraryBottomSheet() {
                 onViewChanged = { },
                 showSteam = true,
                 showCustomGames = true,
+                showGOG = true,
                 onSourceToggle = { },
             )
         }

@@ -12,10 +12,10 @@ object GOGConstants {
 
     // GOG Client ID for authentication
     const val GOG_CLIENT_ID = "46899977096215655"
-    
-    // Redirect URI for OAuth callback
-    const val GOG_REDIRECT_URI = "gamenative://gog-callback"
-    
+
+    // GOG uses a standard redirect URI that we can intercept
+    const val GOG_REDIRECT_URI = "https://embed.gog.com/on_login_success?origin=client"
+
     // GOG OAuth authorization URL with redirect
     const val GOG_AUTH_LOGIN_URL = "https://auth.gog.com/auth?client_id=$GOG_CLIENT_ID&redirect_uri=$GOG_REDIRECT_URI&response_type=code&layout=client2"
 

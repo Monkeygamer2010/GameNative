@@ -112,15 +112,15 @@ class GOGService @Inject constructor() : Service() {
             return withContext(Dispatchers.IO) {
                 try {
                     Timber.d("executeCommand called with args: ${args.joinToString(" ")}")
-                    
+
                     if (!Python.isStarted()) {
                         Timber.e("Python is not started! Cannot execute GOGDL command")
                         return@withContext Result.failure(Exception("Python environment not initialized"))
                     }
-                    
+
                     val python = Python.getInstance()
                     Timber.d("Python instance obtained successfully")
-                    
+
                     val sys = python.getModule("sys")
                     val io = python.getModule("io")
                     val originalArgv = sys.get("argv")
@@ -564,6 +564,105 @@ class GOGService @Inject constructor() : Service() {
             } catch (e: Exception) {
                 Timber.e(e, "Failed to clear GOG credentials")
                 false
+            }
+        }
+
+        /**
+         * Fetch the user's GOG library (list of owned games)
+         * Returns a list of GOGGame objects with basic metadata
+         */
+        suspend fun listGames(context: Context): Result<List<GOGGame>> {
+            return try {
+                Timber.i("Fetching GOG library via GOGDL...")
+                val authConfigPath = "${context.filesDir}/gog_auth.json"
+
+                if (!hasStoredCredentials(context)) {
+                    Timber.e("Cannot list games: not authenticated")
+                    return Result.failure(Exception("Not authenticated. Please log in first."))
+                }
+
+                // Execute gogdl list command - auth-config-path must come BEFORE the command
+                val result = executeCommand("--auth-config-path", authConfigPath, "list", "--pretty")
+
+                if (result.isFailure) {
+                    val error = result.exceptionOrNull()
+                    Timber.e(error, "Failed to fetch GOG library: ${error?.message}")
+                    return Result.failure(error ?: Exception("Failed to fetch GOG library"))
+                }
+
+                val output = result.getOrNull() ?: ""
+                Timber.d("GOGDL list output length: ${output.length}")
+                Timber.d("GOGDL list output preview: ${output.take(500)}")
+
+                // Parse the JSON output
+                try {
+                    // GOGDL list returns a JSON array of games
+                    val gamesArray = org.json.JSONArray(output.trim())
+                    val games = mutableListOf<GOGGame>()
+
+                    Timber.d("Found ${gamesArray.length()} games in GOG library")
+
+                    for (i in 0 until gamesArray.length()) {
+                        try {
+                            val gameObj = gamesArray.getJSONObject(i)
+
+                            // Parse genres array if present
+                            val genresList = mutableListOf<String>()
+                            if (gameObj.has("genres")) {
+                                val genresArray = gameObj.optJSONArray("genres")
+                                if (genresArray != null) {
+                                    for (j in 0 until genresArray.length()) {
+                                        genresList.add(genresArray.getString(j))
+                                    }
+                                }
+                            }
+
+                            // Parse languages array if present
+                            val languagesList = mutableListOf<String>()
+                            if (gameObj.has("languages")) {
+                                val languagesArray = gameObj.optJSONArray("languages")
+                                if (languagesArray != null) {
+                                    for (j in 0 until languagesArray.length()) {
+                                        languagesList.add(languagesArray.getString(j))
+                                    }
+                                }
+                            }
+
+                            val game = GOGGame(
+                                id = gameObj.optString("id", ""),
+                                title = gameObj.optString("title", "Unknown Game"),
+                                slug = gameObj.optString("slug", ""),
+                                imageUrl = gameObj.optString("image", ""),
+                                iconUrl = gameObj.optString("icon", ""),
+                                description = gameObj.optString("description", ""),
+                                releaseDate = gameObj.optString("releaseDate", ""),
+                                developer = gameObj.optString("developer", ""),
+                                publisher = gameObj.optString("publisher", ""),
+                                genres = genresList,
+                                languages = languagesList,
+                                downloadSize = 0L, // Will be fetched separately when needed
+                                installSize = 0L,
+                                isInstalled = false,
+                                installPath = "",
+                                lastPlayed = 0L,
+                                playTime = 0L,
+                            )
+
+                            games.add(game)
+                        } catch (e: Exception) {
+                            Timber.w(e, "Failed to parse game at index $i, skipping")
+                        }
+                    }
+
+                    Timber.i("Successfully parsed ${games.size} games from GOG library")
+                    Result.success(games)
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to parse GOG library JSON: $output")
+                    Result.failure(Exception("Failed to parse GOG library: ${e.message}", e))
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Unexpected error while fetching GOG library")
+                Result.failure(e)
             }
         }
 
