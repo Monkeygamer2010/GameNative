@@ -139,6 +139,10 @@ class LibraryViewModel @Inject constructor(
                 PrefManager.showCustomGamesInLibrary = newValue
                 _state.update { it.copy(showCustomGamesInLibrary = newValue) }
             }
+            GameSource.GOG -> {
+                // TODO: Add GOG library toggle preference
+                // For now, do nothing - GOG games are always shown
+            }
         }
         onFilterApps(paginationCurrentPage)
     }

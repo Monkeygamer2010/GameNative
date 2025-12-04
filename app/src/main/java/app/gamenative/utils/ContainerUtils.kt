@@ -518,7 +518,7 @@ object ContainerUtils {
             }
             GameSource.GOG -> {
                 // Just use DefaultDrives. We can create a specific one later.
-                Timber.d("Sending to Default Drive: $defaultDrives$drive")
+                Timber.d("Sending to Default Drives for GOG: $defaultDrives")
                 defaultDrives
             }
         }

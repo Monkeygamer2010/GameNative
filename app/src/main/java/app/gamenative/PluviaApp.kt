@@ -100,6 +100,19 @@ class PluviaApp : SplitCompatApplication() {
             Timber.e(e, "Failed to initialize Supabase client: ${e.message}")
             e.printStackTrace()
         }
+
+        // Initialize GOG service
+        appScope.launch {
+            try {
+                if (app.gamenative.service.gog.GOGService.initialize(applicationContext)) {
+                    Timber.d("GOGService initialized successfully")
+                } else {
+                    Timber.w("GOGService initialization returned false")
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to initialize GOGService: ${e.message}")
+            }
+        }
     }
 
     companion object {

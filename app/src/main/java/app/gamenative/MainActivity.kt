@@ -196,8 +196,23 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         handleLaunchIntent(intent)
     }
+    
     private fun handleLaunchIntent(intent: Intent) {
-        Timber.d("[IntentLaunch]: handleLaunchIntent called with action=${intent.action}")
+        Timber.d("[IntentLaunch]: handleLaunchIntent called with action=${intent.action}, data=${intent.data}")
+        
+        // Handle GOG OAuth callback
+        if (intent.data?.scheme == "gamenative" && intent.data?.host == "gog-callback") {
+            val code = intent.data?.getQueryParameter("code")
+            Timber.d("[GOG OAuth]: Received callback with code=${code?.take(20)}...")
+            if (code != null) {
+                // Emit event with authorization code
+                lifecycleScope.launch {
+                    PluviaApp.events.emit(app.gamenative.events.AndroidEvent.GOGAuthCodeReceived(code))
+                }
+            }
+            return
+        }
+        
         try {
             val launchRequest = IntentLaunchManager.parseLaunchIntent(intent)
             if (launchRequest != null) {

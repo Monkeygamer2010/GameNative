@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Login
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -57,10 +58,14 @@ import com.winlator.core.AppUtils
 import app.gamenative.ui.component.dialog.MessageDialog
 import app.gamenative.ui.component.dialog.LoadingDialog
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import app.gamenative.utils.LocaleHelper
+import app.gamenative.ui.component.dialog.GOGLoginDialog
+import app.gamenative.service.gog.GOGService
 
 @Composable
 fun SettingsGroupInterface(
@@ -113,6 +118,37 @@ fun SettingsGroupInterface(
     var selectedRegionIndex by rememberSaveable { mutableStateOf(
         steamRegionsList.indexOfFirst { it.first == PrefManager.cellId }.takeIf { it >= 0 } ?: 0
     ) }
+
+    // GOG login dialog state
+    var openGOGLoginDialog by rememberSaveable { mutableStateOf(false) }
+    var gogLoginLoading by rememberSaveable { mutableStateOf(false) }
+    var gogLoginError by rememberSaveable { mutableStateOf<String?>(null) }
+    var gogLoginSuccess by rememberSaveable { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    
+    // Listen for GOG OAuth callback
+    LaunchedEffect(Unit) {
+        app.gamenative.PluviaApp.events.on<app.gamenative.events.AndroidEvent.GOGAuthCodeReceived, Unit> { event ->
+            timber.log.Timber.d("Received GOG auth code from deep link: ${event.authCode.take(20)}...")
+            gogLoginLoading = true
+            gogLoginError = null
+            
+            try {
+                val authConfigPath = "${context.filesDir}/gog_auth.json"
+                val result = app.gamenative.service.gog.GOGService.authenticateWithCode(authConfigPath, event.authCode)
+                gogLoginLoading = false
+                if (result.isSuccess) {
+                    gogLoginSuccess = true
+                    openGOGLoginDialog = false
+                } else {
+                    gogLoginError = result.exceptionOrNull()?.message ?: "Authentication failed"
+                }
+            } catch (e: Exception) {
+                gogLoginLoading = false
+                gogLoginError = e.message ?: "Authentication failed"
+            }
+        }
+    }
 
     SettingsGroup(title = { Text(text = stringResource(R.string.settings_interface_title)) }) {
         SettingsSwitch(
@@ -180,6 +216,20 @@ fun SettingsGroupInterface(
                 )
             }
         }
+    }
+
+    // GOG Integration
+    SettingsGroup(title = { Text(text = "GOG Integration") }) {
+        SettingsMenuLink(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = "GOG Login") },
+            subtitle = { Text(text = "Sign in to your GOG account") },
+            onClick = {
+                openGOGLoginDialog = true
+                gogLoginError = null
+                gogLoginSuccess = false
+            }
+        )
     }
 
     // Downloads settings
@@ -452,6 +502,51 @@ fun SettingsGroupInterface(
         progress = -1f, // Indeterminate progress
         message = stringResource(R.string.settings_language_changing)
     )
+
+    // GOG Login Dialog
+    GOGLoginDialog(
+        visible = openGOGLoginDialog,
+        onDismissRequest = {
+            openGOGLoginDialog = false
+            gogLoginError = null
+            gogLoginLoading = false
+        },
+        onAuthCodeClick = { authCode ->
+            gogLoginLoading = true
+            gogLoginError = null
+            coroutineScope.launch {
+                try {
+                    val authConfigPath = "${context.filesDir}/gog_auth.json"
+                    val result = GOGService.authenticateWithCode(authConfigPath, authCode)
+                    gogLoginLoading = false
+                    if (result.isSuccess) {
+                        gogLoginSuccess = true
+                        openGOGLoginDialog = false
+                    } else {
+                        gogLoginError = result.exceptionOrNull()?.message ?: "Authentication failed"
+                    }
+                } catch (e: Exception) {
+                    gogLoginLoading = false
+                    gogLoginError = e.message ?: "Authentication failed"
+                }
+            }
+        },
+        isLoading = gogLoginLoading,
+        errorMessage = gogLoginError
+    )
+
+    // Success message dialog
+    if (gogLoginSuccess) {
+        MessageDialog(
+            visible = true,
+            onDismissRequest = { gogLoginSuccess = false },
+            onConfirmClick = { gogLoginSuccess = false },
+            confirmBtnText = "OK",
+            icon = Icons.Default.Login,
+            title = "Login Successful",
+            message = "You are now signed in to GOG."
+        )
+    }
 }
 
 
