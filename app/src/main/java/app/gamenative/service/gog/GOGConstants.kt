@@ -1,5 +1,10 @@
 package app.gamenative.service.gog
 
+import app.gamenative.PrefManager
+import java.io.File
+import java.nio.file.Paths
+import timber.log.Timber
+
 /**
  * Constants for GOG integration
  */
@@ -19,16 +24,46 @@ object GOGConstants {
     // GOG OAuth authorization URL with redirect
     const val GOG_AUTH_LOGIN_URL = "https://auth.gog.com/auth?client_id=$GOG_CLIENT_ID&redirect_uri=$GOG_REDIRECT_URI&response_type=code&layout=client2"
 
-    // GOG paths
-    const val GOG_GAMES_BASE_PATH = "/data/data/app.gamenative/files/gog_games"
+    // GOG paths - following Steam's structure pattern
+    private const val INTERNAL_BASE_PATH = "/data/data/app.gamenative/files"
+
+    /**
+     * Internal GOG games installation path (similar to Steam's internal path)
+     * /data/data/app.gamenative/files/GOG/games/common/
+     */
+    val internalGOGGamesPath: String
+        get() = Paths.get(INTERNAL_BASE_PATH, "GOG", "games", "common").toString()
+
+    /**
+     * External GOG games installation path (similar to Steam's external path)
+     * {externalStoragePath}/GOG/games/common/
+     */
+    val externalGOGGamesPath: String
+        get() = Paths.get(PrefManager.externalStoragePath, "GOG", "games", "common").toString()
+
+    /**
+     * Default GOG games installation path based on storage preference
+     * Follows the same logic as Steam games
+     */
+    val defaultGOGGamesPath: String
+        get() {
+            return if (PrefManager.useExternalStorage && File(PrefManager.externalStoragePath).exists()) {
+                Timber.i("GOG using external storage: $externalGOGGamesPath")
+                externalGOGGamesPath
+            } else {
+                Timber.i("GOG using internal storage: $internalGOGGamesPath")
+                internalGOGGamesPath
+            }
+        }
 
     /**
      * Get the install path for a specific GOG game
+     * Similar to Steam's pattern: {base}/GOG/games/common/{sanitized_title}/
      */
     fun getGameInstallPath(gameTitle: String): String {
         // Sanitize game title for filesystem
         val sanitizedTitle = gameTitle.replace(Regex("[^a-zA-Z0-9 ]"), "").trim()
-        return "$GOG_GAMES_BASE_PATH/$sanitizedTitle"
+        return Paths.get(defaultGOGGamesPath, sanitizedTitle).toString()
     }
 
     /**

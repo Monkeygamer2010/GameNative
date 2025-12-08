@@ -485,10 +485,23 @@ class GOGService : Service() {
 
         /**
          * Check if a GOG game is installed (synchronous for UI)
+         * Verifies both database state and file system integrity
          */
         fun isGameInstalled(gameId: String): Boolean {
             return runBlocking(Dispatchers.IO) {
-                getInstance()?.gogLibraryManager?.getGameById(gameId)?.isInstalled == true
+                val dbInstalled = getInstance()?.gogLibraryManager?.getGameById(gameId)?.isInstalled == true
+                if (!dbInstalled) {
+                    return@runBlocking false
+                }
+
+                // Verify the installation is actually valid
+                val (isValid, errorMessage) = verifyInstallation(gameId)
+                if (!isValid) {
+                    Timber.w("Game $gameId marked as installed but verification failed: $errorMessage")
+                    // Consider updating database to mark as not installed
+                    // For now, we just return false
+                }
+                isValid
             }
         }
 
@@ -500,6 +513,275 @@ class GOGService : Service() {
                 val game = getInstance()?.gogLibraryManager?.getGameById(gameId)
                 if (game?.isInstalled == true) game.installPath else null
             }
+        }
+
+        /**
+         * Verify that a GOG game installation is valid and complete
+         *
+         * Checks:
+         * 1. Install directory exists
+         * 2. Installation directory contains files (not empty)
+         * 3. goggame-{gameId}.info file exists (optional - for GOG Galaxy installs)
+         * 4. Primary executable exists (if specified in info file)
+         *
+         * Note: gogdl downloads don't create goggame-*.info files, so we primarily
+         * verify that the directory exists and has content.
+         *
+         * @return Pair<Boolean, String?> - (isValid, errorMessage)
+         */
+        fun verifyInstallation(gameId: String): Pair<Boolean, String?> {
+            val installPath = getInstallPath(gameId)
+            if (installPath == null) {
+                return Pair(false, "Game not marked as installed in database")
+            }
+
+            val installDir = File(installPath)
+            if (!installDir.exists()) {
+                Timber.w("Install directory doesn't exist: $installPath")
+                return Pair(false, "Install directory not found: $installPath")
+            }
+
+            if (!installDir.isDirectory) {
+                Timber.w("Install path is not a directory: $installPath")
+                return Pair(false, "Install path is not a directory: $installPath")
+            }
+
+            // Check that the directory has content (at least some files/folders)
+            val contents = installDir.listFiles()
+            if (contents == null || contents.isEmpty()) {
+                Timber.w("Install directory is empty: $installPath")
+                return Pair(false, "Install directory is empty")
+            }
+
+            // Check for goggame-{gameId}.info file (optional - gogdl doesn't create this)
+            val infoFile = File(installDir, "goggame-$gameId.info")
+            if (infoFile.exists()) {
+                Timber.d("Found GOG Galaxy info file: ${infoFile.absolutePath}")
+
+                // Verify info file is valid JSON
+                try {
+                    val json = JSONObject(infoFile.readText())
+                    val fileGameId = json.optString("gameId", "")
+                    if (fileGameId.isEmpty()) {
+                        Timber.w("Game info file missing gameId field")
+                        return Pair(false, "Invalid game info file: missing gameId")
+                    }
+
+                    // Verify primary executable exists if specified
+                    val playTasks = json.optJSONArray("playTasks")
+                    if (playTasks != null) {
+                        for (i in 0 until playTasks.length()) {
+                            val task = playTasks.getJSONObject(i)
+                            if (task.optBoolean("isPrimary", false)) {
+                                val exePath = task.optString("path", "")
+                                if (exePath.isNotEmpty()) {
+                                    val fullPath = File(installDir, exePath.replace("\\", "/"))
+                                    if (!fullPath.exists()) {
+                                        Timber.w("Primary executable not found: ${fullPath.absolutePath}")
+                                        return Pair(false, "Primary executable missing: ${fullPath.name}")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to parse game info file: ${infoFile.absolutePath}")
+                    // Don't fail verification - info file is optional
+                }
+            } else {
+                Timber.d("No GOG Galaxy info file found (expected for gogdl downloads): goggame-$gameId.info")
+            }
+
+            Timber.i("Installation verified successfully for game $gameId at $installPath (${contents.size} items)")
+            return Pair(true, null)
+        }
+
+        /**
+         * Get the primary executable path for a GOG game
+         * Similar to SteamService.getInstalledExe()
+         *
+         * Returns the full path to the .exe file, or null if not found
+         */
+        fun getInstalledExe(gameId: String): String? {
+            val installPath = getInstallPath(gameId) ?: return null
+            val installDir = File(installPath)
+
+            if (!installDir.exists()) {
+                Timber.w("Install directory doesn't exist: $installPath")
+                return null
+            }
+
+            // GOG games have a goggame-{gameId}.info file with launch information
+            val infoFile = File(installDir, "goggame-$gameId.info")
+
+            if (!infoFile.exists()) {
+                Timber.w("Game info file not found: ${infoFile.absolutePath}")
+                // Fallback: search for .exe files
+                return findExecutableByHeuristic(installDir)
+            }
+
+            try {
+                val json = JSONObject(infoFile.readText())
+                val playTasks = json.optJSONArray("playTasks")
+
+                if (playTasks != null) {
+                    // Find primary task
+                    for (i in 0 until playTasks.length()) {
+                        val task = playTasks.getJSONObject(i)
+                        if (task.optBoolean("isPrimary", false)) {
+                            val exePath = task.optString("path", "")
+                            if (exePath.isNotEmpty()) {
+                                val fullPath = File(installDir, exePath.replace("\\", "/"))
+                                if (fullPath.exists()) {
+                                    Timber.i("Found primary executable via goggame info: ${fullPath.absolutePath}")
+                                    return fullPath.absolutePath
+                                }
+                            }
+                        }
+                    }
+
+                    // If no primary, use first task
+                    if (playTasks.length() > 0) {
+                        val task = playTasks.getJSONObject(0)
+                        val exePath = task.optString("path", "")
+                        if (exePath.isNotEmpty()) {
+                            val fullPath = File(installDir, exePath.replace("\\", "/"))
+                            if (fullPath.exists()) {
+                                Timber.i("Found first executable via goggame info: ${fullPath.absolutePath}")
+                                return fullPath.absolutePath
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Error parsing goggame info file")
+            }
+
+            // Fallback: search for .exe files
+            return findExecutableByHeuristic(installDir)
+        }
+
+        /**
+         * Get Wine start command for launching a GOG game
+         * Static version that doesn't require DI, for use in XServerScreen
+         */
+        fun getWineStartCommand(
+            gameId: String,
+            container: com.winlator.container.Container,
+            envVars: com.winlator.core.envvars.EnvVars,
+            guestProgramLauncherComponent: com.winlator.xenvironment.components.GuestProgramLauncherComponent
+        ): String? {
+            Timber.i("Getting Wine start command for GOG game: $gameId")
+
+            // Verify installation
+            val (isValid, errorMessage) = verifyInstallation(gameId)
+            if (!isValid) {
+                Timber.e("Installation verification failed for game $gameId: $errorMessage")
+                return null
+            }
+
+            // Get game details
+            val game = getGOGGameOf(gameId)
+            if (game == null) {
+                Timber.e("Game not found for ID: $gameId")
+                return null
+            }
+
+            // Get installation path
+            val installPath = getInstallPath(gameId)
+            if (installPath == null) {
+                Timber.e("No install path found for game: $gameId")
+                return null
+            }
+
+            val gameDir = File(installPath)
+            if (!gameDir.exists()) {
+                Timber.e("Game installation directory does not exist: $installPath")
+                return null
+            }
+
+            Timber.i("Found game directory: ${gameDir.absolutePath}")
+
+            // Get executable
+            val executablePath = getInstalledExe(gameId)
+            if (executablePath == null || executablePath.isEmpty()) {
+                Timber.e("No executable found for GOG game $gameId")
+                return null
+            }
+
+            // Find GOG drive letter mapping
+            val gogGamesPath = GOGConstants.defaultGOGGamesPath
+            var gogDriveLetter: String? = null
+
+            for (drive in com.winlator.container.Container.drivesIterator(container.drives)) {
+                if (drive[1] == gogGamesPath) {
+                    gogDriveLetter = drive[0]
+                    break
+                }
+            }
+
+            if (gogDriveLetter == null) {
+                Timber.e("GOG games directory not mapped in container drives: $gogGamesPath")
+                Timber.e("Container drives: ${container.drives}")
+                return null
+            }
+
+            Timber.i("Found GOG games directory mapped to $gogDriveLetter: drive")
+
+            // Calculate relative path from GOG games directory to executable
+            val gogGamesDir = File(gogGamesPath)
+            val execFile = File(executablePath)
+            val relativePath = execFile.relativeTo(gogGamesDir).path.replace('/', '\\')
+
+            // Construct Windows path
+            val windowsPath = "$gogDriveLetter:\\$relativePath"
+
+            // Set working directory to game folder
+            val gameWorkingDir = File(executablePath).parentFile
+            if (gameWorkingDir != null) {
+                guestProgramLauncherComponent.workingDir = gameWorkingDir
+                Timber.i("Setting working directory to: ${gameWorkingDir.absolutePath}")
+                
+                // Set WINEPATH
+                val workingDirRelative = gameWorkingDir.relativeTo(gogGamesDir).path.replace('/', '\\')
+                val workingDirWindows = "$gogDriveLetter:\\$workingDirRelative"
+                envVars.put("WINEPATH", workingDirWindows)
+                Timber.i("Setting WINEPATH to: $workingDirWindows")
+            }
+
+            Timber.i("GOG launch command: \"$windowsPath\"")
+            return "\"$windowsPath\""
+        }
+
+        /**
+         * Heuristic-based executable finder when goggame info is not available
+         * Similar approach to Steam's scorer
+         */
+        private fun findExecutableByHeuristic(installDir: File): String? {
+            val exeFiles = installDir.walk()
+                .filter { it.isFile && it.extension.equals("exe", ignoreCase = true) }
+                .filter { !it.name.contains("unins", ignoreCase = true) } // Skip uninstallers
+                .filter { !it.name.contains("crash", ignoreCase = true) } // Skip crash reporters
+                .filter { !it.name.contains("setup", ignoreCase = true) } // Skip setup
+                .toList()
+
+            if (exeFiles.isEmpty()) {
+                Timber.w("No .exe files found in ${installDir.absolutePath}")
+                return null
+            }
+
+            // Prefer root directory executables
+            val rootExes = exeFiles.filter { it.parentFile == installDir }
+            if (rootExes.isNotEmpty()) {
+                val largest = rootExes.maxByOrNull { it.length() }
+                Timber.i("Found executable in root by heuristic: ${largest?.absolutePath}")
+                return largest?.absolutePath
+            }
+
+            // Otherwise, take the largest executable
+            val largest = exeFiles.maxByOrNull { it.length() }
+            Timber.i("Found executable by size heuristic: ${largest?.absolutePath}")
+            return largest?.absolutePath
         }
 
         /**

@@ -5,6 +5,7 @@ import app.gamenative.PrefManager
 import app.gamenative.data.GameSource
 import app.gamenative.enums.Marker
 import app.gamenative.service.SteamService
+import app.gamenative.service.gog.GOGConstants
 import app.gamenative.utils.CustomGameScanner
 import com.winlator.container.Container
 import com.winlator.container.ContainerData
@@ -517,9 +518,11 @@ object ContainerUtils {
                 }
             }
             GameSource.GOG -> {
-                // Just use DefaultDrives. We can create a specific one later.
-                Timber.d("Sending to Default Drives for GOG: $defaultDrives")
-                defaultDrives
+                // For GOG games, map the GOG games directory to E: drive (similar to Steam)
+                val gogGamesPath = GOGConstants.defaultGOGGamesPath
+                val drive: Char = Container.getNextAvailableDriveLetter(defaultDrives)
+                Timber.d("Mapping GOG games directory to $drive: drive: $gogGamesPath")
+                "$defaultDrives$drive:$gogGamesPath"
             }
         }
         Timber.d("Prepared container drives: $drives")
@@ -702,6 +705,7 @@ object ContainerUtils {
         }
 
         // Ensure Custom Games have the A: drive mapped to the game folder
+        // and GOG games have a drive mapped to the GOG games directory
         val gameSource = extractGameSourceFromContainerId(appId)
         if (gameSource == GameSource.CUSTOM_GAME) {
             val gameFolderPath = CustomGameScanner.getFolderPathFromAppId(appId)
@@ -734,6 +738,27 @@ object ContainerUtils {
                     container.saveData()
                     Timber.d("Updated container drives to include A: drive mapping: $updatedDrives")
                 }
+            }
+        } else if (gameSource == GameSource.GOG) {
+            // Ensure GOG games have the GOG games directory mapped
+            val gogGamesPath = GOGConstants.defaultGOGGamesPath
+            var hasGOGDriveMapping = false
+
+            // Check if any drive is already mapped to the GOG games directory
+            for (drive in Container.drivesIterator(container.drives)) {
+                if (drive[1] == gogGamesPath) {
+                    hasGOGDriveMapping = true
+                    break
+                }
+            }
+
+            // If GOG games directory is not mapped, add it
+            if (!hasGOGDriveMapping) {
+                val driveLetter = Container.getNextAvailableDriveLetter(container.drives)
+                val updatedDrives = "${container.drives}$driveLetter:$gogGamesPath"
+                container.drives = updatedDrives
+                container.saveData()
+                Timber.d("Updated container drives to include $driveLetter: drive mapping for GOG: $updatedDrives")
             }
         }
 

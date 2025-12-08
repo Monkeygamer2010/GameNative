@@ -1113,6 +1113,15 @@ fun preLaunchApp(
             return@launch
         }
 
+        // For GOG Games, bypass Steam Cloud operations entirely and proceed to launch
+        val isGOGGame = ContainerUtils.extractGameSourceFromContainerId(appId) == GameSource.GOG
+        if (isGOGGame) {
+            Timber.tag("preLaunchApp").i("GOG Game detected for $appId — skipping Steam Cloud sync and launching container")
+            setLoadingDialogVisible(false)
+            onSuccess(context, appId)
+            return@launch
+        }
+
         // For Steam games, sync save files and check no pending remote operations are running
         val prefixToPath: (String) -> String = { prefix ->
             PathType.from(prefix).toAbsPath(context, gameId, SteamService.userSteamId!!.accountID)

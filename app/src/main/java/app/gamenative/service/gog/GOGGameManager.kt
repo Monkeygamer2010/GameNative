@@ -307,11 +307,12 @@ class GOGGameManager @Inject constructor(
 
         // Fallback to base path if game not found (shouldn't happen normally)
         Timber.w("Could not find game for appId $appId, using base path")
-        return GOGConstants.GOG_GAMES_BASE_PATH
+        return GOGConstants.defaultGOGGamesPath
     }
 
     /**
      * Launch game with save sync
+     * TODO: Implement GOG cloud save sync - currently disabled
      */
     suspend fun launchGameWithSaveSync(
         context: Context,
@@ -321,38 +322,14 @@ class GOGGameManager @Inject constructor(
         preferredSave: Int?,
     ): PostSyncInfo = withContext(Dispatchers.IO) {
         try {
-            Timber.i("Starting GOG game launch with save sync for ${libraryItem.name}")
+            Timber.i("Starting GOG game launch for ${libraryItem.name} (cloud save sync disabled)")
 
-            // Check if GOG credentials exist
-            if (!GOGService.hasStoredCredentials(context)) {
-                Timber.w("No GOG credentials found, skipping cloud save sync")
-                return@withContext PostSyncInfo(SyncResult.Success) // Continue without sync
-            }
+            // TODO: Implement GOG cloud save sync
+            // For now, just skip sync and return success to allow game launch
+            return@withContext PostSyncInfo(SyncResult.Success)
 
-            // Determine save path for GOG game
-            val savePath = "${getGameInstallPath(context, libraryItem.appId, libraryItem.name)}/saves"
-            val authConfigPath = "${context.filesDir}/gog_auth.json"
-
-            Timber.i("Starting GOG cloud save sync for game ${libraryItem.gameId}")
-
-            // Perform GOG cloud save sync
-            val syncResult = GOGService.syncCloudSaves(
-                gameId = libraryItem.gameId.toString(),
-                savePath = savePath,
-                authConfigPath = authConfigPath,
-                timestamp = 0.0f,
-            )
-
-            if (syncResult.isSuccess) {
-                Timber.i("GOG cloud save sync completed successfully")
-                PostSyncInfo(SyncResult.Success)
-            } else {
-                val error = syncResult.exceptionOrNull()
-                Timber.e(error, "GOG cloud save sync failed")
-                PostSyncInfo(SyncResult.UnknownFail)
-            }
         } catch (e: Exception) {
-            Timber.e(e, "GOG cloud save sync exception for game ${libraryItem.gameId}")
+            Timber.e(e, "GOG game launch exception for game ${libraryItem.gameId}")
             PostSyncInfo(SyncResult.UnknownFail)
         }
     }
@@ -378,11 +355,22 @@ class GOGGameManager @Inject constructor(
         envVars: EnvVars,
         guestProgramLauncherComponent: GuestProgramLauncherComponent,
     ): String {
-        // For GOG games, we always want to launch the actual game
-        // because GOG doesn't have appLaunchInfo like Steam does
-
         // Extract the numeric game ID from appId using the existing utility function
         val gameId = ContainerUtils.extractGameIdFromContainerId(libraryItem.appId)
+
+        // Verify installation before attempting launch
+        val (isValid, errorMessage) = GOGService.verifyInstallation(gameId.toString())
+        if (!isValid) {
+            Timber.e("Installation verification failed for game $gameId: $errorMessage")
+            // Return explorer.exe to avoid crashing, but log the error clearly
+            // In production, you might want to show a user-facing error dialog here
+            return "\"explorer.exe\""
+        }
+
+        Timber.i("Installation verified successfully for game $gameId")
+
+        // For GOG games, we always want to launch the actual game
+        // because GOG doesn't have appLaunchInfo like Steam does
 
         // Get the game details to find the correct title
         val game = runBlocking { getGameById(gameId.toString()) }
@@ -412,15 +400,34 @@ class GOGGameManager @Inject constructor(
             return "\"explorer.exe\""
         }
 
-        // Calculate the Windows path for the game subdirectory
-        val gameSubDirRelativePath = gameDir.relativeTo(File(GOGConstants.GOG_GAMES_BASE_PATH)).path.replace('\\', '/')
-        val windowsGamePath = "E:/gog_games/$gameSubDirRelativePath"
+        // Find which drive letter is mapped to the GOG games directory
+        val gogGamesPath = GOGConstants.defaultGOGGamesPath
+        var gogDriveLetter: String? = null
 
-        // Set WINEPATH to the game subdirectory on E: drive
+        for (drive in Container.drivesIterator(container.drives)) {
+            if (drive[1] == gogGamesPath) {
+                gogDriveLetter = drive[0]
+                break
+            }
+        }
+
+        if (gogDriveLetter == null) {
+            Timber.e("GOG games directory not mapped in container drives: $gogGamesPath")
+            Timber.e("Container drives: ${container.drives}")
+            return "\"explorer.exe\""
+        }
+
+        Timber.i("Found GOG games directory mapped to $gogDriveLetter: drive")
+
+        // Calculate the Windows path for the game subdirectory
+        val gameSubDirRelativePath = gameDir.relativeTo(File(GOGConstants.defaultGOGGamesPath)).path.replace('\\', '/')
+        val windowsGamePath = "$gogDriveLetter:/$gameSubDirRelativePath"
+
+        // Set WINEPATH to the game subdirectory
         envVars.put("WINEPATH", windowsGamePath)
 
         // Set the working directory to the game directory
-        val gameWorkingDir = File(GOGConstants.GOG_GAMES_BASE_PATH, gameSubDirRelativePath)
+        val gameWorkingDir = File(GOGConstants.defaultGOGGamesPath, gameSubDirRelativePath)
         guestProgramLauncherComponent.workingDir = gameWorkingDir
         Timber.i("Setting working directory to: ${gameWorkingDir.absolutePath}")
 

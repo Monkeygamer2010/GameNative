@@ -18,6 +18,7 @@ import androidx.compose.ui.res.stringResource
 import app.gamenative.R
 import app.gamenative.data.GOGGame
 import app.gamenative.data.LibraryItem
+import app.gamenative.service.gog.GOGConstants
 import app.gamenative.service.gog.GOGService
 import app.gamenative.ui.data.AppMenuOption
 import app.gamenative.ui.data.GameDisplayInfo
@@ -233,12 +234,14 @@ class GOGAppScreen : BaseAppScreen() {
                     return@launch
                 }
 
-                // Determine install path (use same pattern as Steam)
-                val downloadDir = File(android.os.Environment.getExternalStorageDirectory(), "Download")
-                val gogGamesDir = File(downloadDir, "GOGGames")
-                gogGamesDir.mkdirs() // Ensure directory exists
-                val installDir = File(gogGamesDir, gameId)
-                val installPath = installDir.absolutePath
+                // Get install path using GOG's path structure (similar to Steam)
+                // This will use external storage if available, otherwise internal
+                val gameTitle = libraryItem.name
+                val installPath = GOGConstants.getGameInstallPath(gameTitle)
+                val installDir = File(installPath)
+
+                // Ensure parent directories exist
+                installDir.parentFile?.let { it.mkdirs() }
 
                 Timber.d("Downloading GOG game to: $installPath")
 
@@ -269,7 +272,7 @@ class GOGAppScreen : BaseAppScreen() {
                             // Download completed successfully
                             Timber.i("GOG download completed: $gameId")
 
-                            // Update or create database entry
+                            // Update or create database entry FIRST, before verification
                             Timber.d("Attempting to fetch game from database for gameId: $gameId")
                             var game = GOGService.getGOGGameOf(gameId)
                             Timber.d("Fetched game from database: game=${game?.title}, isInstalled=${game?.isInstalled}, installPath=${game?.installPath}")
@@ -319,6 +322,17 @@ class GOGAppScreen : BaseAppScreen() {
                                 } catch (e: Exception) {
                                     Timber.e(e, "Exception fetching game from GOG API: $gameId")
                                 }
+                            }
+
+                            // Now verify the installation is valid after database update
+                            Timber.d("Verifying installation for game: $gameId")
+                            val (isValid, errorMessage) = GOGService.verifyInstallation(gameId)
+                            if (!isValid) {
+                                Timber.w("Installation verification failed for game $gameId: $errorMessage")
+                                // Note: We already marked it as installed in DB, but files may be incomplete
+                                // The isGameInstalled() check will catch this on next access
+                            } else {
+                                Timber.i("Installation verified successfully for game: $gameId")
                             }
 
                             // Emit download stopped event
@@ -565,14 +579,17 @@ class GOGAppScreen : BaseAppScreen() {
     }
 
     /**
-     * Override to add GOG-specific analytics
+     * Override to launch GOG games properly (not as boot-to-container)
      */
     override fun onRunContainerClick(
         context: Context,
         libraryItem: LibraryItem,
         onClickPlay: (Boolean) -> Unit
     ) {
-        super.onRunContainerClick(context, libraryItem, onClickPlay)
+        // GOG games should launch with bootToContainer=false so getWineStartCommand
+        // can construct the proper launch command via GOGGameManager
+        Timber.tag(TAG).i("Launching GOG game: ${libraryItem.appId}")
+        onClickPlay(false)
     }
 
     /**
