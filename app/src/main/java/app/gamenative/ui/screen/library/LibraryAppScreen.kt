@@ -47,6 +47,7 @@ import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -65,6 +66,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -195,6 +197,22 @@ fun AppScreen(
     )
 }
 
+/**
+ * Formats bytes into a human-readable string (KB, MB, GB).
+ * Uses binary units (1024 base).
+ */
+private fun formatBytes(bytes: Long): String {
+    val kb = 1024.0
+    val mb = kb * 1024
+    val gb = mb * 1024
+    return when {
+        bytes >= gb -> String.format("%.1f GB", bytes / gb)
+        bytes >= mb -> String.format("%.1f MB", bytes / mb)
+        bytes >= kb -> String.format("%.1f KB", bytes / kb)
+        else -> "$bytes B"
+    }
+}
+
 @Composable
 internal fun AppScreenContent(
     modifier: Modifier = Modifier,
@@ -284,6 +302,27 @@ internal fun AppScreenContent(
                         )
                     )
             )
+
+            // Compatibility status overlay (bottom center)
+            // Must be after gradient but before title to ensure visibility
+            if (displayInfo.compatibilityMessage != null && displayInfo.compatibilityColor != null) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .background(Color.Black.copy(alpha = 0.4f))
+                        .padding(horizontal = 8.dp, vertical = 1.dp)
+                ) {
+                    Text(
+                        text = displayInfo.compatibilityMessage,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(displayInfo.compatibilityColor),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.align(Alignment.Center)
+                    )
+                }
+            }
 
             // Back button (top left)
             Box(
@@ -435,8 +474,8 @@ internal fun AppScreenContent(
                     ) {
                         val text = when {
                             isInstalled -> stringResource(R.string.run_app)
-                            !hasInternet -> "Need internet to install"
-                            !wifiConnected && PrefManager.downloadOnWifiOnly -> "Install over Wi-Fi/LAN only enabled"
+                            !hasInternet -> stringResource(R.string.library_need_internet)
+                            !wifiConnected && PrefManager.downloadOnWifiOnly -> stringResource(R.string.library_wifi_only_enabled)
                             else -> stringResource(R.string.install_app)
                         }
                         Text(
@@ -469,24 +508,24 @@ internal fun AppScreenContent(
 
             // Download progress section
             if (isDownloading) {
-                // Track download start time and estimate remaining time
-                var downloadStartTime by remember { mutableStateOf<Long?>(null) }
-                LaunchedEffect(downloadProgress) {
-                    if (downloadProgress > 0f && downloadStartTime == null) {
-                        downloadStartTime = System.currentTimeMillis()
-                    }
-                }
-                val timeLeftText = remember(downloadProgress, downloadStartTime) {
-                    if (downloadProgress in 0f..1f && downloadStartTime != null && downloadProgress < 1f) {
-                        val elapsed = System.currentTimeMillis() - downloadStartTime!!
-                        val totalEst = (elapsed / downloadProgress).toLong()
-                        val remaining = totalEst - elapsed
-                        val secondsLeft = remaining / 1000
-                        val minutesLeft = secondsLeft / 60
-                        val secondsPart = secondsLeft % 60
+                val downloadInfo = SteamService.getAppDownloadInfo(displayInfo.gameId)
+                val statusMessageFlow = downloadInfo?.getStatusMessageFlow()
+                val statusMessageState = statusMessageFlow?.collectAsState(initial = statusMessageFlow.value)
+                val statusMessage = statusMessageState?.value
+
+                // Use DownloadInfo's byte-based ETA when available for more stable estimates
+                val timeLeftText = remember(displayInfo.appId, downloadProgress, downloadInfo, statusMessage) {
+                    val etaMs = downloadInfo?.getEstimatedTimeRemaining()
+                    if (etaMs != null && etaMs > 0L) {
+                        val totalSeconds = etaMs / 1000
+                        val minutesLeft = totalSeconds / 60
+                        val secondsPart = totalSeconds % 60
                         "${minutesLeft}m ${secondsPart}s left"
+                    } else if (downloadProgress in 0f..1f && downloadProgress < 1f) {
+                        val statusText = statusMessage?.takeUnless { it.isBlank() }
+                        statusText ?: "Calculating..."
                     } else {
-                        "Calculating..."
+                        ""
                     }
                 }
                 Column(
@@ -498,7 +537,7 @@ internal fun AppScreenContent(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Installation Progress",
+                            text = stringResource(R.string.installation_progress),
                             style = MaterialTheme.typography.titleMedium
                         )
                         Text(
@@ -522,20 +561,34 @@ internal fun AppScreenContent(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // This is placeholder text since we don't have exact size info in the state
+                    // Show download size and ETA
+                    val downloadingText = stringResource(R.string.downloading)
+                    val sizeText = remember(displayInfo.gameId, downloadProgress, downloadInfo) {
+                        val (bytesDone, bytesTotal) = downloadInfo?.getBytesProgress() ?: (0L to 0L)
+                        if (bytesTotal > 0L) {
+                            "${formatBytes(bytesDone)} / ${formatBytes(bytesTotal)}"
+                        } else if (bytesDone > 0L) {
+                            formatBytes(bytesDone)
+                        } else {
+                            downloadingText
+                        }
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "Downloading...",
+                            text = sizeText,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = timeLeftText,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -576,7 +629,7 @@ internal fun AppScreenContent(
                                 Text("↑", color = MaterialTheme.colorScheme.onTertiary, fontSize = 14.sp)
                             }
                             Text(
-                                "Update Available",
+                                stringResource(R.string.update_available),
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.tertiary
                             )
@@ -624,7 +677,7 @@ internal fun AppScreenContent(
 
                     Column(modifier = Modifier.padding(24.dp)) {
                         Text(
-                            text = "Game Information",
+                            text = stringResource(R.string.game_information),
                             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                             modifier = Modifier.padding(bottom = 16.dp)
                         )
@@ -640,7 +693,7 @@ internal fun AppScreenContent(
                             item {
                                 Column {
                                     Text(
-                                        text = "Status",
+                                        text = stringResource(R.string.status),
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -665,9 +718,9 @@ internal fun AppScreenContent(
                                             Spacer(modifier = Modifier.width(8.dp))
                                             Text(
                                                 text = when {
-                                                    isInstalled -> "Installed"
-                                                    isDownloading -> "Installing"
-                                                    else -> "Not Installed"
+                                                    isInstalled -> stringResource(R.string.installed)
+                                                    isDownloading -> stringResource(R.string.installing)
+                                                    else -> stringResource(R.string.not_installed)
                                                 },
                                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
                                                 color = MaterialTheme.colorScheme.tertiary
@@ -681,7 +734,7 @@ internal fun AppScreenContent(
                             item {
                                 Column {
                                     Text(
-                                        text = "Size",
+                                        text = stringResource(R.string.size),
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -704,7 +757,7 @@ internal fun AppScreenContent(
 
                                     Column {
                                         Text(
-                                            text = "Location",
+                                            text = stringResource(R.string.location),
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -729,7 +782,7 @@ internal fun AppScreenContent(
                             item {
                                 Column {
                                     Text(
-                                        text = "Developer",
+                                        text = stringResource(R.string.developer),
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -745,7 +798,7 @@ internal fun AppScreenContent(
                             item {
                                 Column {
                                     Text(
-                                        text = "Release Date",
+                                        text = stringResource(R.string.release_date),
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -792,7 +845,7 @@ internal fun GameMigrationDialog(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
-                    text = "File ${movedFiles + 1} of $totalFiles",
+                    text = stringResource(R.string.library_file_count, movedFiles + 1, totalFiles),
                     style = MaterialTheme.typography.bodyLarge,
                 )
 

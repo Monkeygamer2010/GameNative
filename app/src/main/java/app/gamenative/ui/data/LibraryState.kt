@@ -1,6 +1,7 @@
 package app.gamenative.ui.data
 
 import app.gamenative.PrefManager
+import app.gamenative.data.GameCompatibilityStatus
 import app.gamenative.data.LibraryItem
 import app.gamenative.ui.enums.AppFilter
 import java.util.EnumSet
@@ -8,6 +9,7 @@ import java.util.EnumSet
 data class LibraryState(
     val appInfoSortType: EnumSet<AppFilter> = PrefManager.libraryFilter,
     val appInfoList: List<LibraryItem> = emptyList(),
+    val isRefreshing: Boolean = false,
 
     // Human readable, not 0-indexed
     val totalAppsInFilter: Int = 0,
@@ -29,4 +31,7 @@ data class LibraryState(
     // Refresh counter that increments when custom game images are fetched
     // Used to trigger UI recomposition to show newly downloaded images
     val imageRefreshCounter: Long = 0,
+    
+    // Compatibility status map: game name -> compatibility status
+    val compatibilityMap: Map<String, GameCompatibilityStatus> = emptyMap(),
 )

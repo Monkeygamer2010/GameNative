@@ -339,6 +339,13 @@ object PrefManager {
             setPref(BOX64_PRESET, value)
         }
 
+    private val FEXCORE_PRESET = stringPreferencesKey("fexcore_preset")
+    var fexcorePreset: String
+        get() = getPref(FEXCORE_PRESET, com.winlator.fexcore.FEXCorePreset.INTERMEDIATE)
+        set(value) {
+            setPref(FEXCORE_PRESET, value)
+        }
+
     private val RENDERER = stringPreferencesKey("renderer")
     var renderer: String
         get() = getPref(RENDERER, "gl")
@@ -769,4 +776,10 @@ object PrefManager {
     var useAltNotificationIcon: Boolean
         get() = getPref(USE_ALT_NOTIFICATION_ICON, false)
         set(value) = setPref(USE_ALT_NOTIFICATION_ICON, value)
+
+    // App language preference (empty string means system default)
+    private val APP_LANGUAGE = stringPreferencesKey("app_language")
+    var appLanguage: String
+        get() = getPref(APP_LANGUAGE, "")
+        set(value) = setPref(APP_LANGUAGE, value)
 }

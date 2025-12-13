@@ -19,7 +19,7 @@ import com.alorma.compose.settings.ui.SettingsMenuLink
 
 @Composable
 fun SettingsGroupEmulation() {
-    SettingsGroup(title = { Text(text = "Emulation") }) {
+    SettingsGroup(title = { Text(text = stringResource(R.string.settings_emulation_title)) }) {
         var showConfigDialog by rememberSaveable { mutableStateOf(false) }
         var showOrientationDialog by rememberSaveable { mutableStateOf(false) }
         var showBox64PresetsDialog by rememberSaveable { mutableStateOf(false) }
@@ -31,7 +31,7 @@ fun SettingsGroupEmulation() {
 
         ContainerConfigDialog(
             visible = showConfigDialog,
-            title = "Default Container Config",
+            title = stringResource(R.string.settings_emulation_default_config_dialog_title),
             default = true,
             initialConfig = ContainerUtils.getDefaultContainerData(),
             onDismissRequest = { showConfigDialog = false },
@@ -64,22 +64,27 @@ fun SettingsGroupEmulation() {
             app.gamenative.ui.screen.settings.ContentsManagerDialog(open = showContentsManager, onDismiss = { showContentsManager = false })
         }
 
+        var showWineProtonManager by rememberSaveable { mutableStateOf(false) }
+        if (showWineProtonManager) {
+            app.gamenative.ui.screen.settings.WineProtonManagerDialog(open = showWineProtonManager, onDismiss = { showWineProtonManager = false })
+        }
+
         SettingsMenuLink(
             colors = settingsTileColors(),
-            title = { Text(text = "Allowed Orientations") },
-            subtitle = { Text(text = "Choose which orientations can be rotated to when in-game") },
+            title = { Text(text = stringResource(R.string.settings_emulation_orientations_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_emulation_orientations_subtitle)) },
             onClick = { showOrientationDialog = true },
         )
         SettingsMenuLink(
             colors = settingsTileColors(),
-            title = { Text(text = "Modify Default Config") },
-            subtitle = { Text(text = "The initial container settings for each game (does not affect already installed games)") },
+            title = { Text(text = stringResource(R.string.settings_emulation_default_config_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_emulation_default_config_subtitle)) },
             onClick = { showConfigDialog = true },
         )
         SettingsMenuLink(
             colors = settingsTileColors(),
-            title = { Text(text = "Box64 Presets") },
-            subtitle = { Text("View, modify, and create Box64 presets") },
+            title = { Text(text = stringResource(R.string.settings_emulation_box64_presets_title)) },
+            subtitle = { Text(stringResource(R.string.settings_emulation_box64_presets_subtitle)) },
             onClick = { showBox64PresetsDialog = true },
         )
         SettingsMenuLink(
@@ -90,15 +95,21 @@ fun SettingsGroupEmulation() {
         )
         SettingsMenuLink(
             colors = settingsTileColors(),
-            title = { Text(text = "Driver Manager") },
-            subtitle = { Text(text = "Install or remove custom graphics driver packages") },
+            title = { Text(text = stringResource(R.string.settings_emulation_driver_manager_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_emulation_driver_manager_subtitle)) },
             onClick = { showDriverManager = true },
         )
         SettingsMenuLink(
             colors = settingsTileColors(),
-            title = { Text(text = "Contents Manager") },
-            subtitle = { Text(text = "Install additional components (.wcp)") },
+            title = { Text(text = stringResource(R.string.settings_emulation_contents_manager_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_emulation_contents_manager_subtitle)) },
             onClick = { showContentsManager = true },
+        )
+        SettingsMenuLink(
+            colors = settingsTileColors(),
+            title = { Text(text = stringResource(R.string.settings_emulation_wine_proton_manager_title)) },
+            subtitle = { Text(text = stringResource(R.string.settings_emulation_wine_proton_manager_subtitle)) },
+            onClick = { showWineProtonManager = true },
         )
     }
 }

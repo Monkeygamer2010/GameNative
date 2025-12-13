@@ -25,6 +25,7 @@ import app.gamenative.data.SteamApp
 import app.gamenative.data.SteamFriend
 import app.gamenative.data.SteamLicense
 import app.gamenative.data.UserFileInfo
+import app.gamenative.data.EncryptedAppTicket
 import app.gamenative.db.PluviaDatabase
 import app.gamenative.db.dao.ChangeNumbersDao
 import app.gamenative.db.dao.EmoticonDao
@@ -163,6 +164,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import android.util.Base64
+import app.gamenative.db.dao.EncryptedAppTicketDao
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.TimeUnit
@@ -199,6 +202,9 @@ class SteamService : Service(), IChallengeUrlChanged {
 
     @Inject
     lateinit var cachedLicenseDao: CachedLicenseDao
+
+    @Inject
+    lateinit var encryptedAppTicketDao: EncryptedAppTicketDao
 
     private lateinit var notificationHelper: NotificationHelper
 
@@ -279,7 +285,7 @@ class SteamService : Service(), IChallengeUrlChanged {
 
         private val PROTOCOL_TYPES = EnumSet.of(ProtocolTypes.WEB_SOCKET)
 
-        private var instance: SteamService? = null
+        internal var instance: SteamService? = null
 
         private val downloadJobs = ConcurrentHashMap<Int, DownloadInfo>()
 
@@ -500,6 +506,43 @@ class SteamService : Service(), IChallengeUrlChanged {
             }.toMap()
         }
 
+        /**
+         * Refresh the owned games list by querying Steam, diffing with the local DB, and
+         * queueing PICS requests for anything new so metadata gets populated.
+         *
+         * @return number of newly discovered appIds that were scheduled for PICS.
+         */
+        suspend fun refreshOwnedGamesFromServer(): Int = withContext(Dispatchers.IO) {
+            val service = instance ?: return@withContext 0
+            val unifiedFriends = service._unifiedFriends ?: return@withContext 0
+            val steamId = userSteamId ?: return@withContext 0
+
+            runCatching {
+                val ownedGames = unifiedFriends.getOwnedGames(steamId.convertToUInt64())
+                val remoteAppIds = ownedGames.map { it.appId }.filter { it > 0 }.toSet()
+                if (remoteAppIds.isEmpty()) {
+                    return@runCatching 0
+                }
+
+                val localAppIds = service.appDao.getAllAppIds().toSet()
+                val missingAppIds = remoteAppIds - localAppIds
+                if (missingAppIds.isEmpty()) {
+                    return@runCatching 0
+                }
+
+                missingAppIds
+                    .chunked(MAX_PICS_BUFFER)
+                    .forEach { chunk ->
+                        val requests = chunk.map { PICSRequest(id = it) }
+                        service.appPicsChannel.send(requests)
+                    }
+
+                missingAppIds.size
+            }.onFailure { error ->
+                Timber.tag("SteamService").e(error, "Failed to refresh owned games from server")
+            }.getOrDefault(0)
+        }
+
         fun getDownloadableDepots(appId: Int): Map<Int, DepotInfo> {
             val appInfo   = getAppInfoOf(appId) ?: return emptyMap()
             val ownedDlc  = runBlocking { getOwnedAppDlc(appId) }
@@ -552,14 +595,20 @@ class SteamService : Service(), IChallengeUrlChanged {
 
         fun getAppDirPath(gameId: Int): String {
 
-            val appName = getAppDirName(getAppInfoOf(gameId))
+            val info     = getAppInfoOf(gameId)
+            val appName  = getAppDirName(info)
+            val oldName  = info?.name.orEmpty()
 
             // Internal first (legacy installs), external second
             val internalPath = Paths.get(internalAppInstallPath, appName)
             if (Files.exists(internalPath)) return internalPath.pathString
+            val internalOld = Paths.get(internalAppInstallPath, oldName)
+            if (oldName.isNotEmpty() && Files.exists(internalOld)) return internalOld.pathString
 
             val externalPath = Paths.get(externalAppInstallPath, appName)
             if (Files.exists(externalPath)) return externalPath.pathString
+            val externalOld = Paths.get(externalAppInstallPath, oldName)
+            if (oldName.isNotEmpty() && Files.exists(externalOld)) return externalOld.pathString
 
             // Nothing on disk yet – default to whatever location you want new installs to use
             if (PrefManager.useExternalStorage) {
@@ -918,6 +967,18 @@ class SteamService : Service(), IChallengeUrlChanged {
             fetchFileWithFallback("imagefs_patches_gamenative.tzst", dest, context, onDownloadProgress)
         }
 
+        fun downloadFile(
+            onDownloadProgress: (Float) -> Unit,
+            parentScope: CoroutineScope = CoroutineScope(Dispatchers.IO),
+            context: Context,
+            fileName: String
+        ) = parentScope.async {
+            Timber.i("${fileName} will be downloaded")
+            val dest = File(instance!!.filesDir, fileName)
+            Timber.d("Downloading ${fileName} to " + dest.toString());
+            fetchFileWithFallback(fileName, dest, context, onDownloadProgress)
+        }
+
         fun downloadSteam(
             onDownloadProgress: (Float) -> Unit,
             parentScope: CoroutineScope = CoroutineScope(Dispatchers.IO),
@@ -944,27 +1005,7 @@ class SteamService : Service(), IChallengeUrlChanged {
             Timber.d("depotIds is empty? " + depotIds.isEmpty())
             if (depotIds.isEmpty()) return null
 
-            val steamApps = instance!!.steamClient!!.getHandler(SteamApps::class.java)!!
-            val entitledDepotIds = runBlocking {
-                depotIds.map { depotId ->
-                    async(Dispatchers.IO) {
-                        val result = try {
-                            withTimeout(1_000) {          // 5 s is enough for a normal reply
-                                steamApps.getDepotDecryptionKey(depotId, appId)
-                                    .await()
-                                    .result
-                            }
-                        } catch (e: Exception) {
-                            // No reply at all → assume key not required (HL-2 edge-case)
-                            EResult.OK
-                        }
-                        depotId to (result == EResult.OK)
-                    }
-                }.awaitAll()
-                    .filter { it.second }
-                    .map { it.first }
-                    .sorted()
-            }
+            val entitledDepotIds = depotIds.sorted()
 
             Timber.i("entitledDepotIds is empty? " + entitledDepotIds.isEmpty())
 
@@ -975,7 +1016,9 @@ class SteamService : Service(), IChallengeUrlChanged {
             // Create mapping from depotId to index for progress tracking
             val depotIdToIndex = entitledDepotIds.mapIndexed { index, depotId -> depotId to index }.toMap()
 
+            val appDirPath = getAppDirPath(appId)
             val info = DownloadInfo(entitledDepotIds.size).also { di ->
+                di.setPersistencePath(appDirPath)
                 // Set weights for each depot based on manifest sizes
                 val sizes = entitledDepotIds.map { depotId ->
                     val depot = getAppInfoOf(appId)!!.depots[depotId]!!
@@ -985,6 +1028,17 @@ class SteamService : Service(), IChallengeUrlChanged {
                     (mInfo.size ?: 1).toLong()
                 }
                 sizes.forEachIndexed { i, bytes -> di.setWeight(i, bytes) }
+
+                // Total expected size (used for ETA based on recent download speed)
+                val totalBytes = sizes.sum()
+                di.setTotalExpectedBytes(totalBytes)
+
+                // Load persisted bytes downloaded value on resume
+                val persistedBytes = di.loadPersistedBytesDownloaded(appDirPath)
+                if (persistedBytes > 0L) {
+                    di.initializeBytesDownloaded(persistedBytes)
+                    Timber.i("Resumed download: initialized with $persistedBytes bytes")
+                }
 
                 val downloadJob = instance!!.scope.launch {
                     try {
@@ -1004,7 +1058,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                         )
 
                         // Create listener
-                        val listener = AppDownloadListener(di, depotIdToIndex, appId, entitledDepotIds)
+                        val listener = AppDownloadListener(di, depotIdToIndex, appId, entitledDepotIds, appDirPath)
                         depotDownloader.addListener(listener)
 
                         // Create AppItem with only mandatory appId
@@ -1030,6 +1084,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                         depotDownloader.close()
                     } catch (e: Exception) {
                         Timber.e(e, "Download failed for app $appId")
+                        di.persistProgressSnapshot()
                         // Mark all depots as failed
                         entitledDepotIds.forEachIndexed { idx, _ ->
                             di.setWeight(idx, 0)
@@ -1059,7 +1114,11 @@ class SteamService : Service(), IChallengeUrlChanged {
             private val depotIdToIndex: Map<Int, Int>,
             private val appId: Int,
             private val entitledDepotIds: List<Int>,
+            private val appDirPath: String,
         ) : IDownloadListener {
+            // Track cumulative uncompressed bytes per depot to calculate deltas
+            // (uncompressedBytes from onChunkCompleted is cumulative per depot)
+            private val depotCumulativeUncompressedBytes = mutableMapOf<Int, Long>()
             override fun onItemAdded(item: DownloadItem) {
                 Timber.d("Item ${item.appId} added to queue")
             }
@@ -1085,6 +1144,11 @@ class SteamService : Service(), IChallengeUrlChanged {
                     )
                 }
                 MarkerUtils.removeMarker(getAppDirPath(appId), Marker.STEAM_DLL_REPLACED)
+                MarkerUtils.removeMarker(getAppDirPath(appId), Marker.STEAM_COLDCLIENT_USED)
+
+                // Clear persisted bytes file on successful completion
+                downloadInfo.clearPersistedBytesDownloaded(appDirPath)
+
                 removeDownloadJob(appId)
             }
 
@@ -1104,9 +1168,27 @@ class SteamService : Service(), IChallengeUrlChanged {
 
             override fun onStatusUpdate(message: String) {
                 Timber.d("Download status: $message")
+                downloadInfo.updateStatusMessage(message)
             }
 
-            override fun onFileCompleted(depotId: Int, fileName: String, depotPercentComplete: Float) {
+            override fun onChunkCompleted(
+                depotId: Int,
+                depotPercentComplete: Float,
+                compressedBytes: Long,
+                uncompressedBytes: Long,
+            ) {
+                val isFirstCallForDepot = !depotCumulativeUncompressedBytes.containsKey(depotId)
+
+                // uncompressedBytes is cumulative per depot, so calculate delta
+                val previousBytes = depotCumulativeUncompressedBytes[depotId] ?: 0L
+                val deltaBytes = uncompressedBytes - previousBytes
+                depotCumulativeUncompressedBytes[depotId] = uncompressedBytes
+
+                if (deltaBytes > 0L) {
+                    // Normal case: add the delta
+                    downloadInfo.updateBytesDownloaded(deltaBytes, System.currentTimeMillis())
+                }
+
                 depotIdToIndex[depotId]?.let { index ->
                     downloadInfo.setProgress(depotPercentComplete, index)
                 }
@@ -1114,6 +1196,16 @@ class SteamService : Service(), IChallengeUrlChanged {
 
             override fun onDepotCompleted(depotId: Int, compressedBytes: Long, uncompressedBytes: Long) {
                 Timber.i("Depot $depotId completed (compressed: $compressedBytes, uncompressed: $uncompressedBytes)")
+
+                // Ensure we capture any remaining bytes
+                val previousBytes = depotCumulativeUncompressedBytes[depotId] ?: 0L
+                val deltaBytes = uncompressedBytes - previousBytes
+                depotCumulativeUncompressedBytes[depotId] = uncompressedBytes
+
+                if (deltaBytes > 0L) {
+                    downloadInfo.updateBytesDownloaded(deltaBytes, System.currentTimeMillis())
+                }
+
                 depotIdToIndex[depotId]?.let { index ->
                     downloadInfo.setProgress(1f, index)
                 }
@@ -1643,6 +1735,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                         fileChangeListsDao.deleteAll()
                         friendDao.deleteAll()
                         licenseDao.deleteAll()
+                        encryptedAppTicketDao.deleteAll()
                     }
                 }
             }
@@ -2005,6 +2098,12 @@ class SteamService : Service(), IChallengeUrlChanged {
 
     override fun onDestroy() {
         super.onDestroy()
+
+        // Persist download progress for all active downloads
+        // This is a safety net for OS kills (unlikely but possible)
+        downloadJobs.values.forEach { downloadInfo ->
+            downloadInfo.persistProgressSnapshot()
+        }
 
         stopForeground(STOP_FOREGROUND_REMOVE)
         notificationHelper.cancel()
@@ -2755,5 +2854,70 @@ class SteamService : Service(), IChallengeUrlChanged {
                     }
                 }
         }
+    }
+
+    /**
+     * Get encrypted app ticket for an app, with 30-minute caching.
+     * Returns the encrypted ticket bytes, or null if unavailable.
+     */
+    suspend fun getEncryptedAppTicket(appId: Int): ByteArray? {
+        return try {
+            // Check database for existing ticket less than 30 minutes old
+            val cachedTicket = encryptedAppTicketDao.getByAppId(appId)
+            val now = System.currentTimeMillis()
+            val thirtyMinutes = 30 * 60 * 1000L
+
+            if (cachedTicket != null && (now - cachedTicket.timestamp) < thirtyMinutes) {
+                Timber.d("Using cached encrypted app ticket for app $appId")
+                return cachedTicket.encryptedTicket
+            }
+
+            // Request new ticket from Steam
+            val steamApps = instance?._steamApps ?: null
+            val response = try {
+                withTimeout(5_000) {
+                    steamApps?.requestEncryptedAppTicket(appId)?.await()
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to request encrypted app ticket for app $appId")
+                return null
+            }
+
+            if (response?.result != EResult.OK || response.encryptedAppTicket == null) {
+                Timber.w("Failed to get encrypted app ticket for app $appId: ${response?.result}")
+                return null
+            }
+
+            // Extract all fields from the protobuf message
+            val ticketProto = response.encryptedAppTicket
+            val ticket = EncryptedAppTicket(
+                appId = appId,
+                result = response.result.code(),
+                ticketVersionNo = ticketProto!!.ticketVersionNo.toInt(),
+                crcEncryptedTicket = ticketProto.crcEncryptedticket.toInt(),
+                cbEncryptedUserData = ticketProto.cbEncrypteduserdata.toInt(),
+                cbEncryptedAppOwnershipTicket = ticketProto.cbEncryptedAppownershipticket.toInt(),
+                encryptedTicket = ticketProto.encryptedTicket.toByteArray(),
+                timestamp = now,
+            )
+
+            // Store in database
+            encryptedAppTicketDao.insert(ticket)
+            Timber.d("Stored new encrypted app ticket for app $appId")
+
+            ticket.encryptedTicket
+        } catch (e: Exception) {
+            Timber.e(e, "Error getting encrypted app ticket for app $appId")
+            null
+        }
+    }
+
+    /**
+     * Get encrypted app ticket as base64 encoded string, with 30-minute caching.
+     * Returns the base64 encoded ticket, or null if unavailable.
+     */
+    suspend fun getEncryptedAppTicketBase64(appId: Int): String? {
+        val ticket = getEncryptedAppTicket(appId) ?: return null
+        return Base64.encodeToString(ticket, Base64.NO_WRAP)
     }
 }

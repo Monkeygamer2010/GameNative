@@ -18,7 +18,13 @@ import app.gamenative.ui.data.LibraryState
 import app.gamenative.ui.enums.AppFilter
 import app.gamenative.events.AndroidEvent
 import app.gamenative.utils.CustomGameScanner
+import app.gamenative.utils.GameCompatibilityCache
+import app.gamenative.utils.GameCompatibilityService
+import app.gamenative.data.GameCompatibilityStatus
+import com.winlator.core.GPUInformation
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import android.content.Context
 import java.io.File
 import java.util.EnumSet
 import javax.inject.Inject
@@ -28,6 +34,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import kotlin.math.max
@@ -36,6 +43,7 @@ import kotlin.math.min
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
     private val steamAppDao: SteamAppDao,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(LibraryState(isLoading = true))
@@ -63,6 +71,23 @@ class LibraryViewModel @Inject constructor(
 
     // Track if this is the first load to apply minimum load time
     private var isFirstLoad = true
+
+    // Cache GPU name to avoid repeated calls
+    private val gpuName: String by lazy {
+        try {
+            val gpu = GPUInformation.getRenderer(context)
+            if (gpu.isNullOrEmpty()) {
+                Timber.tag("LibraryViewModel").w("GPU name is null or empty")
+                "Unknown GPU"
+            } else {
+                Timber.tag("LibraryViewModel").d("Retrieved GPU name: $gpu")
+                gpu
+            }
+        } catch (e: Exception) {
+            Timber.tag("LibraryViewModel").e(e, "Failed to get GPU name")
+            "Unknown GPU"
+        }
+    }
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
@@ -149,6 +174,25 @@ class LibraryViewModel @Inject constructor(
         onFilterApps(toPage)
     }
 
+    fun onRefresh() {
+        viewModelScope.launch {
+            _state.update { it.copy(isRefreshing = true) }
+
+            try {
+                val newApps = SteamService.refreshOwnedGamesFromServer()
+                if (newApps > 0) {
+                    Timber.tag("LibraryViewModel").i("Queued $newApps newly owned games for PICS sync")
+                } else {
+                    Timber.tag("LibraryViewModel").d("No newly owned games discovered during refresh")
+                }
+            } catch (e: Exception) {
+                Timber.tag("LibraryViewModel").e(e, "Failed to refresh owned games from server")
+            } finally {
+                onFilterApps(0).join()
+                _state.update { it.copy(isRefreshing = false) }
+            }
+        }
+    }
     fun addCustomGameFolder(path: String) {
         viewModelScope.launch(Dispatchers.IO) {
             val normalizedPath = File(path).absolutePath
@@ -169,10 +213,10 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
-    private fun onFilterApps(paginationPage: Int = 0) {
+    private fun onFilterApps(paginationPage: Int = 0): Job {
         // May be filtering 1000+ apps - in future should paginate at the point of DAO request
         Timber.tag("LibraryViewModel").d("onFilterApps - appList.size: ${appList.size}, isFirstLoad: $isFirstLoad")
-        viewModelScope.launch {
+        return viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
 
             val currentState = _state.value
@@ -297,6 +341,9 @@ class LibraryViewModel @Inject constructor(
                 isFirstLoad = false
             }
 
+            // Fetch compatibility for current page games
+            fetchCompatibilityForPage(pagedList.map { it.name })
+
             _state.update {
                 it.copy(
                     appInfoList = pagedList,
@@ -305,6 +352,94 @@ class LibraryViewModel @Inject constructor(
                     totalAppsInFilter = totalFound,
                     isLoading = false, // Loading complete
                 )
+            }
+        }
+    }
+
+    /**
+     * Fetches compatibility information for games in paginated batches.
+     * Checks cache first, then fetches uncached games in batches of 50.
+     */
+    private fun fetchCompatibilityForPage(gameNames: List<String>) {
+        if (gameNames.isEmpty()) {
+            Timber.tag("LibraryViewModel").d("fetchCompatibilityForPage: No game names provided")
+            return
+        }
+
+        Timber.tag("LibraryViewModel").d("fetchCompatibilityForPage: Fetching compatibility for ${gameNames.size} games, GPU: $gpuName")
+
+        // Don't make API calls if GPU name is unknown
+        if (gpuName == "Unknown GPU") {
+            Timber.tag("LibraryViewModel").w("Skipping compatibility fetch - GPU name is unknown")
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                // Separate cached and uncached games
+                val uncachedGames = mutableListOf<String>()
+                val cachedResults = mutableMapOf<String, GameCompatibilityService.GameCompatibilityResponse>()
+
+                for (gameName in gameNames) {
+                    val cached = GameCompatibilityCache.getCached(gameName)
+                    if (cached != null) {
+                        cachedResults[gameName] = cached
+                        Timber.tag("LibraryViewModel").d("Using cached result for: $gameName")
+                    } else {
+                        uncachedGames.add(gameName)
+                    }
+                }
+
+                Timber.tag("LibraryViewModel").d("Cached: ${cachedResults.size}, Uncached: ${uncachedGames.size}")
+
+                // Fetch uncached games in batches of 50
+                val batchSize = 50
+                val fetchedResults = mutableMapOf<String, GameCompatibilityService.GameCompatibilityResponse>()
+
+                for (i in uncachedGames.indices step batchSize) {
+                    val batch = uncachedGames.subList(i, min(i + batchSize, uncachedGames.size))
+                    Timber.tag("LibraryViewModel").d("Fetching batch ${i / batchSize + 1} with ${batch.size} games")
+                    val batchResults = GameCompatibilityService.fetchCompatibility(batch, gpuName)
+
+                    if (batchResults != null) {
+                        Timber.tag("LibraryViewModel").d("Received ${batchResults.size} results from API")
+                        // Cache all results
+                        batchResults.forEach { (gameName, response) ->
+                            GameCompatibilityCache.cache(gameName, response)
+                            fetchedResults[gameName] = response
+                        }
+                    } else {
+                        Timber.tag("LibraryViewModel").w("API returned null for batch")
+                    }
+                }
+
+                // Combine cached and fetched results
+                val allResults = cachedResults + fetchedResults
+                Timber.tag("LibraryViewModel").d("Total results: ${allResults.size}")
+
+                // Convert to compatibility status map
+                val compatibilityMap = allResults.mapValues { (gameName, response) ->
+                    val status = when {
+                        response.isNotWorking -> GameCompatibilityStatus.NOT_COMPATIBLE
+                        !response.hasBeenTried -> GameCompatibilityStatus.UNKNOWN
+                        response.gpuPlayableCount > 0 -> GameCompatibilityStatus.GPU_COMPATIBLE
+                        response.totalPlayableCount > 0 -> GameCompatibilityStatus.COMPATIBLE
+                        else -> GameCompatibilityStatus.UNKNOWN
+                    }
+                    Timber.tag("LibraryViewModel").d("$gameName -> $status (totalPlayable: ${response.totalPlayableCount}, gpuPlayable: ${response.gpuPlayableCount}, isNotWorking: ${response.isNotWorking}, hasBeenTried: ${response.hasBeenTried})")
+                    status
+                }
+
+                // Update state with compatibility map (merge with existing)
+                _state.update { currentState ->
+                    val mergedMap = currentState.compatibilityMap.toMutableMap()
+                    mergedMap.putAll(compatibilityMap)
+                    Timber.tag("LibraryViewModel").d("Updating state with ${compatibilityMap.size} new entries, total: ${mergedMap.size}")
+                    currentState.copy(compatibilityMap = mergedMap)
+                }
+            } catch (e: Exception) {
+                Timber.tag("LibraryViewModel").e(e, "Error fetching compatibility data: ${e.message}")
+                e.printStackTrace()
             }
         }
     }

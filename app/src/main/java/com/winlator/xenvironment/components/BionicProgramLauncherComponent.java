@@ -313,6 +313,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         if (this.envVars != null) {
             envVars.putAll(this.envVars);
         }
+        Log.d("BionicProgramLauncherComponent", "env vars are " + envVars.toString());
 
         String emulator = container.getEmulator();
 
@@ -442,18 +443,6 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         envVars.put("BOX64_X11GLX", "1");
         File box64RCFile = new File(imageFs.getRootDir(), "/etc/config.box64rc");
         envVars.put("BOX64_RCFILE", box64RCFile.getPath());
-    }
-
-    public void suspendProcess() {
-        synchronized (lock) {
-            if (pid != -1) ProcessHelper.suspendProcess(pid);
-        }
-    }
-
-    public void resumeProcess() {
-        synchronized (lock) {
-            if (pid != -1) ProcessHelper.resumeProcess(pid);
-        }
     }
 
     public String execShellCommand(String command) {

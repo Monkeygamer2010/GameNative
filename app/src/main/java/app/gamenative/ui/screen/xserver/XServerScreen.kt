@@ -1556,10 +1556,6 @@ private fun setupXEnvironment(
     }
     environment.addComponent(guestProgramLauncherComponent)
 
-
-    // Generate fexcore per app settings
-    FEXCoreManager.createAppConfigFiles(context)
-
     // Log container settings before starting
     if (container != null) {
         Timber.i("---- Launching Container ----")
@@ -1580,6 +1576,24 @@ private fun setupXEnvironment(
         Timber.i("Env Vars (Final Guest): ${envVars.toString()}")   // Log the actual env vars being passed
         Timber.i("Guest Executable: ${guestProgramLauncherComponent.guestExecutable}") // Log the command
         Timber.i("---------------------------")
+    }
+
+    // Request encrypted app ticket for Steam games at launch time
+    val isCustomGame = ContainerUtils.extractGameSourceFromContainerId(appId) == GameSource.CUSTOM_GAME
+    val gameIdForTicket = ContainerUtils.extractGameIdFromContainerId(appId)
+    if (!bootToContainer && !isCustomGame && gameIdForTicket != null) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val ticket = SteamService.instance?.getEncryptedAppTicket(gameIdForTicket)
+                if (ticket != null) {
+                    Timber.i("Successfully retrieved encrypted app ticket for app $gameIdForTicket")
+                } else {
+                    Timber.w("Failed to retrieve encrypted app ticket for app $gameIdForTicket")
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Error requesting encrypted app ticket for app $gameIdForTicket")
+            }
+        }
     }
 
     environment.startEnvironmentComponents()
@@ -1609,6 +1623,18 @@ private fun getWineStartCommand(
 
     // Check if this is a Custom Game
     val isCustomGame = ContainerUtils.extractGameSourceFromContainerId(appId) == GameSource.CUSTOM_GAME
+    val steamAppId = ContainerUtils.extractGameIdFromContainerId(appId)
+
+    if (!isCustomGame) {
+        if (container.executablePath.isEmpty()){
+            container.executablePath = SteamService.getInstalledExe(steamAppId)
+            container.saveData()
+        }
+        if (!container.isUseLegacyDRM){
+            // Create ColdClientLoader.ini file
+            SteamUtils.writeColdClientIni(steamAppId, container)
+        }
+    }
 
     val args = if (bootToContainer) {
         "\"wfm.exe\""
@@ -1663,7 +1689,6 @@ private fun getWineStartCommand(
         Timber.tag("XServerScreen").w("appLaunchInfo is null for Steam game: $appId")
         "\"wfm.exe\""
     } else {
-        val steamAppId = ContainerUtils.extractGameIdFromContainerId(appId)
         if (container.isLaunchRealSteam()) {
             // Launch Steam with the applaunch parameter to start the game
             "\"C:\\\\Program Files (x86)\\\\Steam\\\\steam.exe\" -silent -vgui -tcp " +
@@ -1696,8 +1721,6 @@ private fun getWineStartCommand(
                 envVars.put("WINEPATH", "$drive:/${appLaunchInfo.workingDir}")
                 "\"$drive:/${executablePath}\""
             } else {
-                // Create ColdClientLoader.ini file
-                SteamUtils.writeColdClientIni(steamAppId, container)
                 "\"C:\\\\Program Files (x86)\\\\Steam\\\\steamclient_loader_x64.exe\""
             }
         }
@@ -2231,7 +2254,7 @@ private fun extractDXWrapperFiles(
             val profile: ContentProfile? = contentsManager.getProfileByEntryName(dxwrapper)
             // Determine graphics driver to choose DXVK version
             val vortekLike = container.graphicsDriver == "vortek" || container.graphicsDriver == "adreno" || container.graphicsDriver == "sd-8-elite"
-            val dxvkVersionForVkd3d = if (vortekLike && GPUHelper.vkGetApiVersion() < GPUHelper.vkMakeVersion(1, 3, 0)) "1.10.3" else "2.4.1"
+            val dxvkVersionForVkd3d = if (vortekLike && GPUHelper.vkGetApiVersionSafe() < GPUHelper.vkMakeVersion(1, 3, 0)) "1.10.3" else "2.4.1"
             Timber.i("Extracting VKD3D DX version for dxwrapper: $dxvkVersionForVkd3d")
             TarCompressorUtils.extract(
                 TarCompressorUtils.Type.ZSTD, context.assets,
@@ -2393,7 +2416,7 @@ private fun extractWinComponentFiles(
 
         for (wincomponent in KeyValueSet(wincomponents)) {
             try {
-                if (wincomponent[1].equals(oldWinComponentsIter.next()[1])) continue
+                if (wincomponent[1].equals(oldWinComponentsIter.next()[1]) && !firstTimeBoot) continue
             } catch (e: StringIndexOutOfBoundsException) {
                 Timber.d("Wincomponent ${wincomponent[0]} does not exist in oldwincomponents, skipping")
             }
@@ -2669,11 +2692,10 @@ private fun extractGraphicsDriverFiles(
             adrenotoolsManager.setDriverById(envVars, imageFs, adrenoToolsDriverId)
         }
 
-        var vulkanVersion = graphicsDriverConfig.get("vulkanVersion")
-        val detectedVkVersion = GPUInformation.getVulkanVersion(adrenoToolsDriverId, context)
-        val vulkanVersionPatch = detectedVkVersion.split(".").getOrNull(2) ?: "0"
+        var vulkanVersion = graphicsDriverConfig.get("vulkanVersion") ?: "1.0"
+        val vulkanVersionPatch = GPUHelper.vkVersionPatch()
 
-        vulkanVersion = vulkanVersion + "." + vulkanVersionPatch
+        vulkanVersion = "$vulkanVersion.$vulkanVersionPatch"
         envVars.put("WRAPPER_VK_VERSION", vulkanVersion)
 
         val blacklistedExtensions: String? = graphicsDriverConfig.get("blacklistedExtensions")
