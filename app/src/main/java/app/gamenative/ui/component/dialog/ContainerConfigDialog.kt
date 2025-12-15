@@ -156,6 +156,12 @@ fun ContainerConfigDialog(
         val renderingModes = stringArrayResource(R.array.offscreen_rendering_modes).toList()
         val videoMemSizes = stringArrayResource(R.array.video_memory_size_entries).toList()
         val mouseWarps = stringArrayResource(R.array.mouse_warp_override_entries).toList()
+        val externalDisplayModes = listOf(
+            stringResource(R.string.external_display_mode_off),
+            stringResource(R.string.external_display_mode_touchpad),
+            stringResource(R.string.external_display_mode_keyboard),
+            stringResource(R.string.external_display_mode_hybrid),
+        )
         val winCompOpts = stringArrayResource(R.array.win_component_entries).toList()
         val box64Versions = stringArrayResource(R.array.box64_version_entries).toList()
         val wowBox64VersionsBase = stringArrayResource(R.array.wowbox64_version_entries).toList()
@@ -656,6 +662,15 @@ fun ContainerConfigDialog(
         var mouseWarpIndex by rememberSaveable {
             val index = mouseWarps.indexOfFirst { it.lowercase() == config.mouseWarpOverride }
             mutableIntStateOf(if (index >= 0) index else 0)
+        }
+        var externalDisplayModeIndex by rememberSaveable {
+            val index = when (config.externalDisplayMode.lowercase()) {
+                "touchpad" -> 1
+                "keyboard" -> 2
+                "hybrid" -> 3
+                else -> 0
+            }
+            mutableIntStateOf(index)
         }
         var languageIndex by rememberSaveable {
             val idx = languages.indexOfFirst { it == config.language.lowercase() }
@@ -1633,6 +1648,25 @@ fun ContainerConfigDialog(
                                     subtitle = { Text(text = stringResource(R.string.touchscreen_mode_description)) },
                                     state = config.touchscreenMode,
                                     onCheckedChange = { config = config.copy(touchscreenMode = it) }
+                                )
+                                // External display handling
+                                SettingsListDropdown(
+                                    colors = settingsTileColors(),
+                                    title = { Text(text = stringResource(R.string.external_display_input)) },
+                                    subtitle = { Text(text = stringResource(R.string.external_display_input_subtitle)) },
+                                    value = externalDisplayModeIndex,
+                                    items = externalDisplayModes,
+                                    onItemSelected = { index ->
+                                        externalDisplayModeIndex = index
+                                        config = config.copy(
+                                            externalDisplayMode = when (index) {
+                                                1 -> "touchpad"
+                                                2 -> "keyboard"
+                                                3 -> "hybrid"
+                                                else -> "off"
+                                            },
+                                        )
+                                    },
                                 )
                             }
                             if (selectedTab == 4) SettingsGroup() {

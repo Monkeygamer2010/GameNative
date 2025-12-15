@@ -59,6 +59,7 @@ import app.gamenative.data.LaunchInfo
 import app.gamenative.data.SteamApp
 import app.gamenative.events.AndroidEvent
 import app.gamenative.events.SteamEvent
+import app.gamenative.externaldisplay.ExternalDisplayInputController
 import app.gamenative.service.SteamService
 import app.gamenative.ui.component.settings.SettingsListDropdown
 import app.gamenative.ui.data.XServerState
@@ -792,6 +793,23 @@ fun XServerScreen(
 
             // Add InputControlsView on top of XServerView
             frameLayout.addView(icView)
+            val externalDisplayController = ExternalDisplayInputController(
+                context = context,
+                xServer = xServerView.getxServer(),
+                winHandler = xServerView.getxServer().winHandler,
+                inputControlsViewProvider = { PluviaApp.inputControlsView },
+                touchpadViewProvider = { PluviaApp.touchpadView },
+            ).apply {
+                setMode(ExternalDisplayInputController.fromConfig(container.externalDisplayMode))
+                start()
+            }
+            frameLayout.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(v: View) {}
+
+                override fun onViewDetachedFromWindow(v: View) {
+                    externalDisplayController.stop()
+                }
+            })
             // Don't call hideInputControls() here - let the auto-show logic below handle visibility
             // so that the view gets measured/laid out and has valid dimensions for element loading
 

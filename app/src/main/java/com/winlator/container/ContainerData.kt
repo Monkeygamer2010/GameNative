@@ -72,6 +72,8 @@ data class ContainerData(
     val disableMouseInput: Boolean = false,
     /** Touchscreen mode **/
     val touchscreenMode: Boolean = false,
+    /** External display input handling: off|touchpad|keyboard|hybrid **/
+    val externalDisplayMode: String = "hybrid",
     /** Preferred game language (Goldberg) **/
     val language: String = "english",
     val forceDlc: Boolean = false,
@@ -125,6 +127,7 @@ data class ContainerData(
                     "dinputMapperType" to state.dinputMapperType,
                     "disableMouseInput" to state.disableMouseInput,
                     "touchscreenMode" to state.touchscreenMode,
+                    "externalDisplayMode" to state.externalDisplayMode,
                     "useDRI3" to state.useDRI3,
                     "language" to state.language,
                     "forceDlc" to state.forceDlc,
@@ -177,6 +180,7 @@ data class ContainerData(
                     dinputMapperType = savedMap["dinputMapperType"] as Byte,
                     disableMouseInput = savedMap["disableMouseInput"] as Boolean,
                     touchscreenMode = savedMap["touchscreenMode"] as Boolean,
+                    externalDisplayMode = (savedMap["externalDisplayMode"] as? String) ?: "touchpad",
                     useDRI3 = (savedMap["useDRI3"] as? Boolean) ?: true,
                     language = (savedMap["language"] as? String) ?: "english",
                     forceDlc = (savedMap["forceDlc"] as? Boolean) ?: false,

@@ -112,6 +112,8 @@ public class Container {
     private boolean disableMouseInput = false;
     // Touchscreen mode
     private boolean touchscreenMode = false;
+    // External display input handling
+    private String externalDisplayMode = "hybrid";
     // Prefer DRI3 WSI path
     private boolean useDRI3 = true;
     // Steam client type for selecting appropriate Box64 RC config: normal, light, ultralight
@@ -646,6 +648,7 @@ public class Container {
             data.put("disableMouseInput", disableMouseInput);
             // Touchscreen mode flag
             data.put("touchscreenMode", touchscreenMode);
+            data.put("externalDisplayMode", externalDisplayMode);
             data.put("useDRI3", useDRI3);
             data.put("installPath", installPath);
             data.put("steamType", steamType);
@@ -816,6 +819,9 @@ public class Container {
                 case "touchscreenMode" :
                     setTouchscreenMode(data.getBoolean(key));
                     break;
+                case "externalDisplayMode" :
+                    setExternalDisplayMode(data.getString(key));
+                    break;
                 case "useDRI3" :
                     setUseDRI3(data.getBoolean(key));
                     break;
@@ -941,6 +947,15 @@ public class Container {
 
     public void setTouchscreenMode(boolean touchscreenMode) {
         this.touchscreenMode = touchscreenMode;
+    }
+
+    // External display mode
+    public String getExternalDisplayMode() {
+        return externalDisplayMode != null ? externalDisplayMode : "hybrid";
+    }
+
+    public void setExternalDisplayMode(String externalDisplayMode) {
+        this.externalDisplayMode = externalDisplayMode != null ? externalDisplayMode : "touchpad";
     }
 
     // Use DRI3 WSI

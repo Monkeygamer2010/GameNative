@@ -118,6 +118,7 @@ object ContainerUtils {
 			enableDInput = PrefManager.dinputEnabled,
 			dinputMapperType = PrefManager.dinputMapperType.toByte(),
             disableMouseInput = PrefManager.disableMouseInput,
+            externalDisplayMode = PrefManager.externalDisplayInputMode,
             sharpnessEffect = PrefManager.sharpnessEffect,
             sharpnessLevel = PrefManager.sharpnessLevel,
             sharpnessDenoise = PrefManager.sharpnessDenoise,
@@ -155,6 +156,7 @@ object ContainerUtils {
         PrefManager.mouseWarpOverride = containerData.mouseWarpOverride
         PrefManager.useDRI3 = containerData.useDRI3
         PrefManager.disableMouseInput = containerData.disableMouseInput
+        PrefManager.externalDisplayInputMode = containerData.externalDisplayMode
         PrefManager.containerLanguage = containerData.language
         PrefManager.containerVariant = containerData.containerVariant
         PrefManager.wineVersion = containerData.wineVersion
@@ -219,6 +221,7 @@ object ContainerUtils {
         val disableMouse = container.isDisableMouseInput()
         // Read touchscreen-mode flag from container
         val touchscreenMode = container.isTouchscreenMode()
+        val externalDisplayMode = container.getExternalDisplayMode()
 
         return ContainerData(
             name = container.name,
@@ -261,6 +264,7 @@ object ContainerUtils {
             dinputMapperType = mapperType,
             disableMouseInput = disableMouse,
             touchscreenMode = touchscreenMode,
+            externalDisplayMode = externalDisplayMode,
             csmt = csmt,
             videoPciDeviceID = videoPciDeviceID,
             offScreenRenderingMode = offScreenRenderingMode,
@@ -381,6 +385,7 @@ object ContainerUtils {
         container.setFEXCorePreset(containerData.fexcorePreset)
         container.setDisableMouseInput(containerData.disableMouseInput)
         container.setTouchscreenMode(containerData.touchscreenMode)
+        container.setExternalDisplayMode(containerData.externalDisplayMode)
         container.setForceDlc(containerData.forceDlc)
         container.setUseLegacyDRM(containerData.useLegacyDRM)
         container.putExtra("sharpnessEffect", containerData.sharpnessEffect)
