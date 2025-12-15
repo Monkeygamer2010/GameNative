@@ -16,10 +16,10 @@ class GOGConverter {
 
     @TypeConverter
     fun toStringList(value: String): List<String> {
-        return if (value.isEmpty()) {
-            emptyList()
-        } else {
-            Json.decodeFromString<List<String>>(value)
+
+        if (value.isEmpty()) {
+            return emptyList()
         }
+        return Json.decodeFromString<List<String>>(value)
     }
 }
