@@ -365,6 +365,7 @@ class LibraryViewModel @Inject constructor(
                 PrefManager.customGamesCount = customGameItems.size
                 PrefManager.steamGamesCount = filteredSteamApps.size
                 PrefManager.gogGamesCount = filteredGOGGames.size
+                PrefManager.gogInstalledGamesCount = gogInstalledCount
                 Timber.tag("LibraryViewModel").d("Saved counts - Custom: ${customGameItems.size}, Steam: ${filteredSteamApps.size}, GOG: ${filteredGOGGames.size}, GOG installed: $gogInstalledCount")
             }
 
@@ -412,7 +413,6 @@ class LibraryViewModel @Inject constructor(
                     currentPaginationPage = paginationPage + 1, // visual display is not 0 indexed
                     lastPaginationPage = lastPageInCurrentFilter + 1,
                     totalAppsInFilter = totalFound,
-                    gogInstalledCount = gogInstalledCount,
                     isLoading = false, // Loading complete
                 )
             }

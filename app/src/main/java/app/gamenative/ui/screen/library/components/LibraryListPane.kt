@@ -103,9 +103,9 @@ private fun calculateInstalledCount(state: LibraryState): Int {
         0
     }
 
-    // Count GOG games that are installed (from LibraryState)
+    // Count GOG games that are installed (from PrefManager)
     val gogCount = if (state.showGOGInLibrary) {
-        state.gogInstalledCount
+        PrefManager.gogInstalledGamesCount
     } else {
         0
     }
@@ -142,7 +142,6 @@ internal fun LibraryListPane(
         state.showCustomGamesInLibrary,
         state.showGOGInLibrary,
         state.totalAppsInFilter,
-        state.gogInstalledCount
     ) {
         calculateInstalledCount(state)
     }

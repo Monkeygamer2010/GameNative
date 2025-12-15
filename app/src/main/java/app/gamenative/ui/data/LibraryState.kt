@@ -26,9 +26,6 @@ data class LibraryState(
     val showCustomGamesInLibrary: Boolean = PrefManager.showCustomGamesInLibrary,
     val showGOGInLibrary: Boolean = PrefManager.showGOGInLibrary,
 
-    // Installed counts by source
-    val gogInstalledCount: Int = 0,
-
     // Loading state for skeleton loaders
     val isLoading: Boolean = false,
 
