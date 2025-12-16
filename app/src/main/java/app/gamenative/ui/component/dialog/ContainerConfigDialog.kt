@@ -260,15 +260,16 @@ fun ContainerConfigDialog(
         // Exposed device extensions selection indices; populated dynamically when UI opens
         var exposedExtIndices by rememberSaveable { mutableStateOf(listOf<Int>()) }
         val inspectionMode = LocalInspectionMode.current
-        val gpuExtensions = remember(inspectionMode) {
-            if (inspectionMode) {
-                listOf(
-                    "VK_KHR_swapchain",
-                    "VK_KHR_maintenance1",
-                    "VK_KHR_timeline_semaphore",
-                )
+        var gpuExtensions by remember { mutableStateOf<List<String>>(emptyList()) }
+        LaunchedEffect(inspectionMode) {
+            gpuExtensions = if (inspectionMode) {
+                listOf("VK_KHR_swapchain", "VK_KHR_maintenance1", "VK_KHR_timeline_semaphore")
             } else {
-                GPUHelper.vkGetDeviceExtensions().toList()
+                try {
+                    GPUHelper.vkGetDeviceExtensions()?.toList() ?: emptyList()
+                } catch (e: Exception) {
+                    emptyList()
+                }
             }
         }
         LaunchedEffect(config.graphicsDriverConfig) {

@@ -141,6 +141,11 @@ static VkResult create_instance(jstring driverName, JNIEnv *env, jobject context
     PFN_vkGetInstanceProcAddr gip = (PFN_vkGetInstanceProcAddr)dlsym(vulkan_handle, "vkGetInstanceProcAddr");
     PFN_vkCreateInstance createInstance = (PFN_vkCreateInstance)dlsym(vulkan_handle, "vkCreateInstance");
 
+    if (!gip || !createInstance) {
+        status = VK_ERROR_INITIALIZATION_FAILED;
+        goto cleanup;
+    }
+
     VkApplicationInfo app_info = {};
     app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     app_info.pApplicationName = "Winlator";
@@ -160,6 +165,11 @@ static VkResult create_instance(jstring driverName, JNIEnv *env, jobject context
 
     if (result != VK_SUCCESS) {
         status = result;
+        goto cleanup;
+    }
+
+    if (!gip) {
+        status = VK_ERROR_INITIALIZATION_FAILED;
         goto cleanup;
     }
 
@@ -185,6 +195,10 @@ cleanup:
 static VkResult enumerate_physical_devices() {
     VkResult result;
     uint32_t deviceCount;
+
+    if (!enumeratePhysicalDevices) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
 
     result = enumeratePhysicalDevices(instance, &deviceCount, NULL);
 
@@ -338,6 +352,11 @@ Java_com_winlator_core_GPUInformation_enumerateExtensions(JNIEnv *env, jclass ob
         goto cleanup;
     }
 
+    if (!enumerateDeviceExtensionProperties) {
+        printf("enumerateDeviceExtensionProperties is NULL");
+        goto cleanup;
+    }
+
     result = enumerateDeviceExtensionProperties(physicalDevice, NULL, &extensionCount, NULL);
 
     if (result != VK_SUCCESS || extensionCount < 1) {
@@ -362,9 +381,15 @@ Java_com_winlator_core_GPUInformation_enumerateExtensions(JNIEnv *env, jclass ob
     extensions = (jobjectArray) (*env)->NewObjectArray(env, extensionCount,
                                                        stringClass,
                                                        NULL);
+
+    if (!extensions) {
+        printf("Failed to create extensions array");
+        goto cleanup;
+    }
     for (int i = 0; i < extensionCount; i++) {
-        (*env)->SetObjectArrayElement(env, extensions, i,
-                                      (*env)->NewStringUTF(env, extensionProperties[i].extensionName));
+        jstring js = (*env)->NewStringUTF(env, extensionProperties[i].extensionName);
+        (*env)->SetObjectArrayElement(env, extensions, i, js)
+        (*env)->DeleteLocalRef(env, js);
     }
 
 cleanup:
