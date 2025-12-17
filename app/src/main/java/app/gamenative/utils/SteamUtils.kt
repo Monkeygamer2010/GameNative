@@ -760,12 +760,14 @@ object SteamUtils {
 
         val appIni = settingsDir.resolve("configs.app.ini")
         val dlcIds = SteamService.getDlcDepotsOf(steamAppId)
+        val hiddenDlcApps = SteamService.getHiddenDlcAppsOf(steamAppId)
 
         val forceDlc = container.isForceDlc()
         val appIniContent = buildString {
             appendLine("[app::dlcs]")
             appendLine("unlock_all=${if (forceDlc) 1 else 0}")
             dlcIds?.forEach { appendLine("$it=dlc$it") }
+            hiddenDlcApps?.forEach { appendLine("${it.id}=${it.name}") }
 
             // Add cloud save config sections if appInfo exists
             if (appInfo != null) {
