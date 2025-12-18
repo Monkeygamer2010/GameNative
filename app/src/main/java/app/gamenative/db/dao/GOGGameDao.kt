@@ -67,10 +67,11 @@ interface GOGGameDao {
         games.forEach { newGame ->
             val existingGame = getById(newGame.id)
             if (existingGame != null) {
-                // Preserve installation status and path from existing game
+                // Preserve installation status, path, and size from existing game
                 val gameToInsert = newGame.copy(
                     isInstalled = existingGame.isInstalled,
                     installPath = existingGame.installPath,
+                    installSize = existingGame.installSize,
                     lastPlayed = existingGame.lastPlayed,
                     playTime = existingGame.playTime,
                 )

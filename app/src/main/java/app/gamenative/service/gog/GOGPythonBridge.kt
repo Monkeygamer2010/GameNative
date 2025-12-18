@@ -18,8 +18,9 @@ class ProgressCallback(private val downloadInfo: DownloadInfo) {
             val progress = (percent / 100.0f).coerceIn(0.0f, 1.0f)
 
             // Update byte-level progress for more accurate tracking
-            val downloadedBytes = (downloadedMB * 1_000_000).toLong()
-            val totalBytes = (totalMB * 1_000_000).toLong()
+            // GOGDL uses binary mebibytes (MiB), so convert using 1024*1024 not 1_000_000
+            val downloadedBytes = (downloadedMB * 1024 * 1024).toLong()
+            val totalBytes = (totalMB * 1024 * 1024).toLong()
 
             // Set total bytes if we haven't already and it's available
             if (totalBytes > 0 && downloadInfo.getTotalExpectedBytes() == 0L) {

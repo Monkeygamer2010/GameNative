@@ -99,11 +99,9 @@ class LibraryViewModel @Inject constructor(
                 // ownerIds = SteamService.familyMembers.ifEmpty { listOf(SteamService.userSteamId!!.accountID.toInt()) },
             ).collect { apps ->
                 Timber.tag("LibraryViewModel").d("Collecting ${apps.size} apps")
-
                 if (appList.size != apps.size) {
                     // Don't filter if it's no change
                     appList = apps
-
                     onFilterApps(paginationCurrentPage)
                 }
             }
@@ -114,10 +112,10 @@ class LibraryViewModel @Inject constructor(
             gogGameDao.getAll().collect { games ->
                 Timber.tag("LibraryViewModel").d("Collecting ${games.size} GOG games")
 
-                val sizeChanged = gogGameList.size != games.size
+                val hasChanges = gogGameList.size != games.size || gogGameList != games
                 gogGameList = games
 
-                if (sizeChanged) {
+                if (hasChanges) {
                     onFilterApps(paginationCurrentPage)
                 }
             }

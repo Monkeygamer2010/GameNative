@@ -39,8 +39,8 @@ class ProgressBar(threading.Thread):
                         self.logger.info(f"Progress reporting cancelled for game {self.game_id}")
                         self.completed = True
                         break
-                except:
-                    pass
+                except (ImportError, AttributeError) as e:
+                    self.logger.debug(f"Failed to check cancellation flag: {e}")
 
             self.print_progressbar()
             self.downloaded_since_last_update = self.decompressed_since_last_update = 0
@@ -48,13 +48,13 @@ class ProgressBar(threading.Thread):
             timestamp = time()
             while not self.completed and (time() - timestamp) < 1:
                 try:
-                    dl, dec = self.speed_queue.get(timeout=1)
+                    dl, dec = self.speed_queue.get(timeout=0.5)
                     self.downloaded_since_last_update += dl
                     self.decompressed_since_last_update += dec
                 except queue.Empty:
                     pass
                 try:
-                    wr, r = self.write_queue.get(timeout=1)
+                    wr, r = self.write_queue.get(timeout=0.5)
                     self.written_since_last_update += wr
                     self.read_since_last_update += r
                 except queue.Empty:
@@ -62,7 +62,11 @@ class ProgressBar(threading.Thread):
 
         self.print_progressbar()
     def print_progressbar(self):
-        percentage = (self.written_total / self.total) * 100
+        # Guard against division by zero when total is 0
+        if self.total:
+            percentage = (self.written_total / self.total) * 100
+        else:
+            percentage = 0
         running_time = time() - self.started_at
         runtime_h = int(running_time // 3600)
         runtime_m = int((running_time % 3600) // 60)
@@ -85,7 +89,7 @@ class ProgressBar(threading.Thread):
             estimated_time = (100 * running_time) / percentage - running_time
         else:
             estimated_time = 0
-        estimated_time = max(estimated_time, 0) # Cap to 0
+        estimated_time = max(estimated_time, 0) # Floor at 0
 
         estimated_h = int(estimated_time // 3600)
         estimated_time = estimated_time % 3600

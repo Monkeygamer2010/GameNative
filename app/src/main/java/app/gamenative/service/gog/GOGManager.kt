@@ -468,7 +468,13 @@ class GOGManager @Inject constructor(
                 }
 
                 // Create support directory for redistributables
-                val supportDir = File(installDir.parentFile, "gog-support")
+                val parentDir = installDir.parentFile
+                val supportDir = if (parentDir != null) {
+                    File(parentDir, "gog-support")
+                } else {
+                    Timber.w("[Download] installDir.parentFile is null for $installPath, using installDir as fallback parent")
+                    File(installDir, "gog-support")
+                }
                 if (!supportDir.exists()) {
                     Timber.d("[Download] Creating support directory: ${supportDir.absolutePath}")
                     supportDir.mkdirs()
