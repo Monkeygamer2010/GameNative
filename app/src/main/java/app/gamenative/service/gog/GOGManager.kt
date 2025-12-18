@@ -298,6 +298,11 @@ class GOGManager @Inject constructor(
     suspend fun downloadGame(context: Context, gameId: String, installPath: String, downloadInfo: DownloadInfo): Result<Unit> {
         return withContext(Dispatchers.IO) {
             try {
+                // Check authentication first
+                if (!GOGAuthManager.hasStoredCredentials(context)) {
+                    return@withContext Result.failure(Exception("Not authenticated. Please login to GOG first."))
+                }
+
                 Timber.i("[Download] Starting GOGDL download for game $gameId to $installPath")
 
                 val installDir = File(installPath)
@@ -318,8 +323,11 @@ class GOGManager @Inject constructor(
 
                 Timber.d("[Download] Calling GOGPythonBridge with gameId=$numericGameId, authConfig=$authConfigPath")
 
-                // Initialize progress
+                // Initialize progress and emit download started event
                 downloadInfo.setProgress(0.0f)
+                app.gamenative.PluviaApp.events.emitJava(
+                    app.gamenative.events.AndroidEvent.DownloadStatusChanged(gameId.toLongOrNull() ?: 0L, true)
+                )
 
                 val result = GOGPythonBridge.executeCommandWithCallback(
                     downloadInfo,
@@ -335,17 +343,82 @@ class GOGManager @Inject constructor(
 
                 if (result.isSuccess) {
                     downloadInfo.setProgress(1.0f)
-                    Timber.d("[Download] GOGDL download completed successfully for game $gameId")
+                    Timber.i("[Download] GOGDL download completed successfully for game $gameId")
+
+                    // Update or create database entry
+                    var game = getGameById(gameId)
+                    if (game != null) {
+                        // Game exists - update install status
+                        Timber.d("Updating existing game install status: isInstalled=true, installPath=$installPath")
+                        val updatedGame = game.copy(
+                            isInstalled = true,
+                            installPath = installPath
+                        )
+                        updateGame(updatedGame)
+                        Timber.i("Updated GOG game install status in database for ${game.title}")
+                    } else {
+                        // Game not in database - fetch from API and insert
+                        Timber.w("Game not found in database, fetching from GOG API for gameId: $gameId")
+                        try {
+                            val refreshResult = refreshSingleGame(gameId, context)
+                            if (refreshResult.isSuccess) {
+                                game = refreshResult.getOrNull()
+                                if (game != null) {
+                                    val updatedGame = game.copy(
+                                        isInstalled = true,
+                                        installPath = installPath
+                                    )
+                                    insertGame(updatedGame)
+                                    Timber.i("Fetched and inserted GOG game ${game.title} with install status")
+                                } else {
+                                    Timber.w("Failed to fetch game data from GOG API for gameId: $gameId")
+                                }
+                            } else {
+                                Timber.e(refreshResult.exceptionOrNull(), "Error fetching game from GOG API: $gameId")
+                            }
+                        } catch (e: Exception) {
+                            Timber.e(e, "Exception fetching game from GOG API: $gameId")
+                        }
+                    }
+
+                    // Verify installation
+                    val (isValid, errorMessage) = verifyInstallation(gameId)
+                    if (!isValid) {
+                        Timber.w("Installation verification failed for game $gameId: $errorMessage")
+                    } else {
+                        Timber.i("Installation verified successfully for game: $gameId")
+                    }
+
+                    // Emit completion events
+                    app.gamenative.PluviaApp.events.emitJava(
+                        app.gamenative.events.AndroidEvent.DownloadStatusChanged(gameId.toLongOrNull() ?: 0L, false)
+                    )
+                    app.gamenative.PluviaApp.events.emitJava(
+                        app.gamenative.events.AndroidEvent.LibraryInstallStatusChanged(gameId.toLongOrNull() ?: 0L)
+                    )
+
                     Result.success(Unit)
                 } else {
                     downloadInfo.setProgress(-1.0f)
                     val error = result.exceptionOrNull()
                     Timber.e(error, "[Download] GOGDL download failed for game $gameId")
+
+                    // Emit download stopped event on failure
+                    app.gamenative.PluviaApp.events.emitJava(
+                        app.gamenative.events.AndroidEvent.DownloadStatusChanged(gameId.toLongOrNull() ?: 0L, false)
+                    )
+
                     Result.failure(error ?: Exception("Download failed"))
                 }
             } catch (e: Exception) {
                 Timber.e(e, "[Download] Exception during download for game $gameId")
                 downloadInfo.setProgress(-1.0f)
+
+                // Emit download stopped event on exception
+                app.gamenative.PluviaApp.events.emitJava(
+                    app.gamenative.events.AndroidEvent.DownloadStatusChanged(gameId.toLongOrNull() ?: 0L, false)
+                )
+
                 Result.failure(e)
             }
         }

@@ -212,159 +212,39 @@ class GOGAppScreen : BaseAppScreen() {
 
     /**
      * Perform the actual download after confirmation
+     * Delegates to GOGService/GOGManager for proper service layer separation
      */
     private fun performDownload(context: Context, libraryItem: LibraryItem, onClickPlay: (Boolean) -> Unit) {
-        // For GOG games, appId is already the numeric game ID
         val gameId = libraryItem.appId
         Timber.i("Starting GOG game download: ${libraryItem.appId}")
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                // Get auth config path
-                val authConfigPath = "${context.filesDir}/gog_auth.json"
-                val authFile = File(authConfigPath)
-                if (!authFile.exists()) {
-                    Timber.e("GOG authentication file not found. User needs to login first.")
-                    withContext(Dispatchers.Main) {
-                        android.widget.Toast.makeText(
-                            context,
-                            "Please login to GOG first in Settings",
-                            android.widget.Toast.LENGTH_LONG
-                        ).show()
-                    }
-                    return@launch
-                }
-
-                // Get install path using GOG's path structure (similar to Steam)
-                // This will use external storage if available, otherwise internal
-                val gameTitle = libraryItem.name
-                val installPath = GOGConstants.getGameInstallPath(gameTitle)
-                val installDir = File(installPath)
-
-                // Ensure parent directories exist
-                installDir.parentFile?.let { it.mkdirs() }
-
+                // Get install path
+                val installPath = GOGConstants.getGameInstallPath(libraryItem.name)
                 Timber.d("Downloading GOG game to: $installPath")
 
-                // Start download
+                // Show starting download toast
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        context,
+                        "Starting download for ${libraryItem.name}...",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+
+                // Start download - GOGService will handle monitoring, database updates, verification, and events
                 val result = GOGService.downloadGame(context, gameId, installPath)
 
                 if (result.isSuccess) {
-                    val info = result.getOrNull()
                     Timber.i("GOG download started successfully for: $gameId")
-
-                    // Emit download started event to update UI state immediately
-                    Timber.tag(TAG).d("[EVENT] Emitting DownloadStatusChanged: appId=${libraryItem.gameId} (from appId=${libraryItem.appId}), isDownloading=true")
-                    app.gamenative.PluviaApp.events.emitJava(
-                        app.gamenative.events.AndroidEvent.DownloadStatusChanged(libraryItem.gameId, true)
-                    )
-                    Timber.tag(TAG).d("[EVENT] Emitted DownloadStatusChanged event")
-
-                    // Monitor download completion
-                    info?.let { downloadInfo ->
-                        // Wait for download to complete
-                        while (downloadInfo.getProgress() in 0f..0.99f) {
-                            kotlinx.coroutines.delay(1000)
-                        }
-
-                        val finalProgress = downloadInfo.getProgress()
-                        Timber.i("GOG download final progress: $finalProgress for game: $gameId")
-                        if (finalProgress >= 1.0f) {
-                            // Download completed successfully
-                            Timber.i("GOG download completed: $gameId")
-
-                            // Update or create database entry FIRST, before verification
-                            Timber.d("Attempting to fetch game from database for gameId: $gameId")
-                            var game = GOGService.getGOGGameOf(gameId)
-                            Timber.d("Fetched game from database: game=${game?.title}, isInstalled=${game?.isInstalled}, installPath=${game?.installPath}")
-
-                            if (game != null) {
-                                // Game exists in database - update install status
-                                Timber.d("Updating existing game install status: isInstalled=true, installPath=$installPath")
-                                GOGService.updateGOGGame(
-                                    game.copy(
-                                        isInstalled = true,
-                                        installPath = installPath
-                                    )
-                                )
-                                Timber.i("Updated GOG game install status in database for ${game.title}")
-                            } else {
-                                // Game not in database - fetch from API and insert
-                                Timber.w("Game not found in database, fetching from GOG API for gameId: $gameId")
-                                try {
-                                    val result = GOGService.refreshSingleGame(gameId, context)
-                                    if (result.isSuccess) {
-                                        game = result.getOrNull()
-                                        if (game != null) {
-                                            // Insert/update the newly fetched game with install info using REPLACE strategy
-                                            val updatedGame = game.copy(
-                                                isInstalled = true,
-                                                installPath = installPath
-                                            )
-                                            Timber.d("About to insert game with: isInstalled=true, installPath=$installPath")
-
-                                            // Wait for database write to complete
-                                            withContext(Dispatchers.IO) {
-                                                GOGService.insertOrUpdateGOGGame(updatedGame)
-                                            }
-
-                                            Timber.i("Fetched and inserted GOG game ${game.title} with install status")
-                                            Timber.d("Game install status in memory: isInstalled=${updatedGame.isInstalled}, installPath=${updatedGame.installPath}")
-
-                                            // Verify database write
-                                            val verifyGame = GOGService.getGOGGameOf(gameId)
-                                            Timber.d("Verification read from database: isInstalled=${verifyGame?.isInstalled}, installPath=${verifyGame?.installPath}")
-                                        } else {
-                                            Timber.w("Failed to fetch game data from GOG API for gameId: $gameId")
-                                        }
-                                    } else {
-                                        Timber.e(result.exceptionOrNull(), "Error fetching game from GOG API: $gameId")
-                                    }
-                                } catch (e: Exception) {
-                                    Timber.e(e, "Exception fetching game from GOG API: $gameId")
-                                }
-                            }
-
-                            // Now verify the installation is valid after database update
-                            Timber.d("Verifying installation for game: $gameId")
-                            val (isValid, errorMessage) = GOGService.verifyInstallation(gameId)
-                            if (!isValid) {
-                                Timber.w("Installation verification failed for game $gameId: $errorMessage")
-                                // Note: We already marked it as installed in DB, but files may be incomplete
-                                // The isGameInstalled() check will catch this on next access
-                            } else {
-                                Timber.i("Installation verified successfully for game: $gameId")
-                            }
-
-                            // Emit download stopped event
-                            Timber.tag(TAG).d("[EVENT] Emitting DownloadStatusChanged: appId=${libraryItem.gameId}, isDownloading=false")
-                            app.gamenative.PluviaApp.events.emitJava(
-                                app.gamenative.events.AndroidEvent.DownloadStatusChanged(libraryItem.gameId, false)
-                            )
-
-                            // Trigger library refresh for install status
-                            Timber.tag(TAG).d("[EVENT] Emitting LibraryInstallStatusChanged: appId=${libraryItem.gameId}")
-                            app.gamenative.PluviaApp.events.emitJava(
-                                app.gamenative.events.AndroidEvent.LibraryInstallStatusChanged(libraryItem.gameId)
-                            )
-                            Timber.tag(TAG).d("[EVENT] All completion events emitted")
-                        } else {
-                            Timber.w("GOG download did not complete successfully: $finalProgress")
-                            // Emit download stopped event even if failed/cancelled
-                            app.gamenative.PluviaApp.events.emitJava(
-                                app.gamenative.events.AndroidEvent.DownloadStatusChanged(libraryItem.gameId, false)
-                            )
-                        }
-                    }
+                    // Success toast will be shown when download completes (monitored by GOGService)
                 } else {
-                    Timber.e(result.exceptionOrNull(), "Failed to start GOG download")
-                    // Emit download stopped event if download failed to start
-                    app.gamenative.PluviaApp.events.emitJava(
-                        app.gamenative.events.AndroidEvent.DownloadStatusChanged(libraryItem.gameId, false)
-                    )
+                    val error = result.exceptionOrNull()
+                    Timber.e(error, "Failed to start GOG download")
                     withContext(Dispatchers.Main) {
                         android.widget.Toast.makeText(
                             context,
-                            "Failed to start download: ${result.exceptionOrNull()?.message}",
+                            "Failed to start download: ${error?.message}",
                             android.widget.Toast.LENGTH_LONG
                         ).show()
                     }
@@ -570,9 +450,6 @@ class GOGAppScreen : BaseAppScreen() {
         return null // GOG uses CDN images, not local files
     }
 
-    /**
-     * Observe GOG game state changes (download progress, install status)
-     */
     override fun observeGameState(
         context: Context,
         libraryItem: LibraryItem,
