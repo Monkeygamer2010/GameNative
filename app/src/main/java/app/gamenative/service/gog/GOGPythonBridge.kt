@@ -16,7 +16,30 @@ class ProgressCallback(private val downloadInfo: DownloadInfo) {
     fun update(percent: Float = 0f, downloadedMB: Float = 0f, totalMB: Float = 0f, downloadSpeedMBps: Float = 0f, eta: String = "") {
         try {
             val progress = (percent / 100.0f).coerceIn(0.0f, 1.0f)
+
+            // Update byte-level progress for more accurate tracking
+            val downloadedBytes = (downloadedMB * 1_000_000).toLong()
+            val totalBytes = (totalMB * 1_000_000).toLong()
+
+            // Set total bytes if we haven't already and it's available
+            if (totalBytes > 0 && downloadInfo.getTotalExpectedBytes() == 0L) {
+                downloadInfo.setTotalExpectedBytes(totalBytes)
+            }
+
+            // Update bytes downloaded (delta from previous update)
+            val previousBytes = downloadInfo.getBytesDownloaded()
+            if (downloadedBytes > previousBytes) {
+                val deltaBytes = downloadedBytes - previousBytes
+                downloadInfo.updateBytesDownloaded(deltaBytes)
+            }
+
+            // Also set percentage-based progress for compatibility
             downloadInfo.setProgress(progress)
+
+            // Update status message with ETA
+            if (eta.isNotEmpty() && eta != "00:00:00") {
+                downloadInfo.updateStatusMessage("ETA: $eta")
+            }
 
             if (percent > 0f) {
                 Timber.d("Download progress: %.1f%% (%.1f/%.1f MB) Speed: %.2f MB/s ETA: %s",

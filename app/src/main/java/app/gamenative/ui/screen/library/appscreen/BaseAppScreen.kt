@@ -585,6 +585,13 @@ abstract class BaseAppScreen {
 
         val optionsMenu = getOptionsMenu(context, libraryItem, onEditContainer, onBack, onClickPlay, exportFrontendLauncher)
 
+        // Get download info based on game source for progress tracking
+        val downloadInfo = when (libraryItem.gameSource) {
+            app.gamenative.data.GameSource.STEAM -> app.gamenative.service.SteamService.getAppDownloadInfo(displayInfo.gameId)
+            app.gamenative.data.GameSource.GOG -> app.gamenative.service.gog.GOGService.getDownloadInfo(displayInfo.appId)
+            app.gamenative.data.GameSource.CUSTOM_GAME -> null // Custom games don't support downloads yet
+        }
+
         DisposableEffect(libraryItem.appId) {
             val dispose = observeGameState(
                 context = context,
@@ -613,6 +620,7 @@ abstract class BaseAppScreen {
             downloadProgress = downloadProgressState,
             hasPartialDownload = hasPartialDownloadState,
             isUpdatePending = isUpdatePendingState,
+            downloadInfo = downloadInfo,
             onDownloadInstallClick = {
                 onDownloadInstallClick(context, libraryItem, onClickPlay)
                 uiScope.launch {

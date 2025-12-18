@@ -159,6 +159,13 @@ class GOGManager @Inject constructor(
             Timber.d("Upserting ${games.size} games to database...")
             gogGameDao.upsertPreservingInstallStatus(games)
 
+            // Scan for existing installations on filesystem
+            Timber.d("Scanning for existing installations...")
+            val detectedCount = detectAndUpdateExistingInstallations()
+            if (detectedCount > 0) {
+                Timber.i("Detected and updated $detectedCount existing installations")
+            }
+
             Timber.tag("GOG").i("Successfully refreshed GOG library with ${games.size} games")
             Result.success(games.size)
         } catch (e: Exception) {
@@ -254,6 +261,160 @@ class GOGManager @Inject constructor(
         return result
     }
 
+    /**
+     * Scan the GOG games directories for existing installations
+     * and update the database with installation info
+     *
+     * @return Number of installations detected and updated
+     */
+    private suspend fun detectAndUpdateExistingInstallations(): Int = withContext(Dispatchers.IO) {
+        var detectedCount = 0
+
+        try {
+            // Check both internal and external storage paths
+            val pathsToCheck = listOf(
+                GOGConstants.internalGOGGamesPath,
+                GOGConstants.externalGOGGamesPath
+            )
+
+            for (basePath in pathsToCheck) {
+                val baseDir = File(basePath)
+                if (!baseDir.exists() || !baseDir.isDirectory) {
+                    Timber.d("Skipping non-existent path: $basePath")
+                    continue
+                }
+
+                Timber.d("Scanning for installations in: $basePath")
+                val installDirs = baseDir.listFiles { file -> file.isDirectory } ?: emptyArray()
+
+                for (installDir in installDirs) {
+                    try {
+                        val detectedGame = detectGameFromDirectory(installDir)
+                        if (detectedGame != null) {
+                            // Update database with installation info
+                            val existingGame = getGameById(detectedGame.id)
+                            if (existingGame != null && !existingGame.isInstalled) {
+                                val updatedGame = existingGame.copy(
+                                    isInstalled = true,
+                                    installPath = detectedGame.installPath,
+                                    installSize = detectedGame.installSize
+                                )
+                                updateGame(updatedGame)
+                                detectedCount++
+                                Timber.i("Detected existing installation: ${existingGame.title} at ${installDir.absolutePath}")
+                            } else if (existingGame != null) {
+                                Timber.d("Game ${existingGame.title} already marked as installed")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Timber.w(e, "Error detecting game in ${installDir.name}")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Error during installation detection")
+        }
+
+        detectedCount
+    }
+
+    /**
+     * Try to detect which game is installed in the given directory
+     * by looking for GOG-specific files and matching against the database
+     *
+     * @param installDir The directory to check
+     * @return GOGGame with installation info, or null if no game detected
+     */
+    private suspend fun detectGameFromDirectory(installDir: File): GOGGame? {
+        if (!installDir.exists() || !installDir.isDirectory) {
+            return null
+        }
+
+        val dirName = installDir.name
+        Timber.d("Checking directory: $dirName")
+
+        // Look for .info files which contain game metadata
+        val infoFiles = installDir.listFiles { file ->
+            file.isFile && file.extension == "info"
+        } ?: emptyArray()
+
+        if (infoFiles.isNotEmpty()) {
+            // Try to parse game ID from .info file
+            val infoFile = infoFiles.first()
+            try {
+                val infoContent = infoFile.readText()
+                val infoJson = JSONObject(infoContent)
+                val gameId = infoJson.optString("gameId", "")
+                if (gameId.isNotEmpty()) {
+                    val game = getGameById(gameId)
+                    if (game != null) {
+                        val installSize = calculateDirectorySize(installDir)
+                        return game.copy(
+                            isInstalled = true,
+                            installPath = installDir.absolutePath,
+                            installSize = installSize
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.w(e, "Error parsing .info file: ${infoFile.name}")
+            }
+        }
+
+        // Fallback: Try to match by directory name with game titles in database
+        val allGames = gogGameDao.getAllAsList()
+        for (game in allGames) {
+            // Sanitize game title to match directory naming convention
+            val sanitizedTitle = game.title.replace(Regex("[^a-zA-Z0-9 ]"), "").trim()
+
+            if (dirName.equals(sanitizedTitle, ignoreCase = true)) {
+                // Verify it's actually a game directory (has executables or subdirectories)
+                val hasContent = installDir.listFiles()?.any {
+                    it.isDirectory || it.extension in listOf("exe", "dll", "bat")
+                } == true
+
+                if (hasContent) {
+                    val installSize = calculateDirectorySize(installDir)
+                    Timber.d("Matched directory '$dirName' to game '${game.title}'")
+                    return game.copy(
+                        isInstalled = true,
+                        installPath = installDir.absolutePath,
+                        installSize = installSize
+                    )
+                }
+            }
+        }
+
+        return null
+    }
+
+    /**
+     * Calculate the total size of a directory recursively
+     *
+     * @param directory The directory to calculate size for
+     * @return Total size in bytes
+     */
+    private fun calculateDirectorySize(directory: File): Long {
+        var size = 0L
+        try {
+            if (!directory.exists() || !directory.isDirectory) {
+                return 0L
+            }
+
+            val files = directory.listFiles() ?: return 0L
+            for (file in files) {
+                size += if (file.isDirectory) {
+                    calculateDirectorySize(file)
+                } else {
+                    file.length()
+                }
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Error calculating directory size for ${directory.name}")
+        }
+        return size
+    }
+
     suspend fun refreshSingleGame(gameId: String, context: Context): Result<GOGGame?> {
         return try {
             Timber.d("Fetching single game data for gameId: $gameId")
@@ -313,6 +474,15 @@ class GOGManager @Inject constructor(
                     supportDir.mkdirs()
                 }
 
+                // Get expected download size from database for accurate progress tracking
+                val game = getGameById(gameId)
+                if (game != null && game.downloadSize > 0L) {
+                    downloadInfo.setTotalExpectedBytes(game.downloadSize)
+                    Timber.d("[Download] Set total expected bytes: ${game.downloadSize} (${game.downloadSize / 1_000_000} MB)")
+                } else {
+                    Timber.w("[Download] Could not determine download size for game $gameId")
+                }
+
                 val authConfigPath = GOGAuthManager.getAuthConfigPath(context)
                 val numericGameId = ContainerUtils.extractGameIdFromContainerId(gameId).toString()
 
@@ -320,6 +490,7 @@ class GOGManager @Inject constructor(
 
                 // Initialize progress and emit download started event
                 downloadInfo.setProgress(0.0f)
+                downloadInfo.setActive(true)
                 app.gamenative.PluviaApp.events.emitJava(
                     app.gamenative.events.AndroidEvent.DownloadStatusChanged(gameId.toIntOrNull() ?: 0, true)
                 )
@@ -340,14 +511,19 @@ class GOGManager @Inject constructor(
                     downloadInfo.setProgress(1.0f)
                     Timber.i("[Download] GOGDL download completed successfully for game $gameId")
 
+                    // Calculate actual disk size
+                    val diskSize = calculateDirectorySize(File(installPath))
+                    Timber.d("[Download] Calculated install size: $diskSize bytes (${diskSize / 1_000_000} MB)")
+
                     // Update or create database entry
                     var game = getGameById(gameId)
                     if (game != null) {
                         // Game exists - update install status
-                        Timber.d("Updating existing game install status: isInstalled=true, installPath=$installPath")
+                        Timber.d("Updating existing game install status: isInstalled=true, installPath=$installPath, installSize=$diskSize")
                         val updatedGame = game.copy(
                             isInstalled = true,
-                            installPath = installPath
+                            installPath = installPath,
+                            installSize = diskSize
                         )
                         updateGame(updatedGame)
                         Timber.i("Updated GOG game install status in database for ${game.title}")
@@ -361,7 +537,8 @@ class GOGManager @Inject constructor(
                                 if (game != null) {
                                     val updatedGame = game.copy(
                                         isInstalled = true,
-                                        installPath = installPath
+                                        installPath = installPath,
+                                        installSize = diskSize
                                     )
                                     insertGame(updatedGame)
                                     Timber.i("Fetched and inserted GOG game ${game.title} with install status")

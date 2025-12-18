@@ -41,7 +41,7 @@ class ProgressBar(threading.Thread):
                         break
                 except:
                     pass
-                    
+
             self.print_progressbar()
             self.downloaded_since_last_update = self.decompressed_since_last_update = 0
             self.written_since_last_update = self.read_since_last_update = 0
@@ -59,7 +59,7 @@ class ProgressBar(threading.Thread):
                     self.read_since_last_update += r
                 except queue.Empty:
                     pass
-                
+
         self.print_progressbar()
     def print_progressbar(self):
         percentage = (self.written_total / self.total) * 100
@@ -69,7 +69,7 @@ class ProgressBar(threading.Thread):
         runtime_s = int((running_time % 3600) % 60)
 
         print_time_delta = time() - self.last_update
-        
+
         current_dl_speed = 0
         current_decompress = 0
         if print_time_delta:
@@ -112,6 +112,20 @@ class ProgressBar(threading.Thread):
             f" + Disk\t- {current_w_speed / 1024 / 1024:.02f} MiB/s (write) / "
             f"{current_r_speed / 1024 / 1024:.02f} MiB/s (read)"
         )
+
+        # Call Android progress callback if available
+        try:
+            import gogdl
+            if hasattr(gogdl, '_progress_callback'):
+                callback = gogdl._progress_callback
+                downloaded_mb = self.downloaded / 1024 / 1024
+                total_mb = self.total / 1024 / 1024
+                speed_mbps = current_dl_speed / 1024 / 1024
+                eta_str = f"{estimated_h:02d}:{estimated_m:02d}:{estimated_s:02d}"
+                callback.update(percentage, downloaded_mb, total_mb, speed_mbps, eta_str)
+        except Exception as e:
+            # Silently ignore if callback not available (e.g. running standalone)
+            pass
 
         self.last_update = time()
 

@@ -233,15 +233,20 @@ class GOGService : Service() {
                     if (result.isFailure) {
                         Timber.e(result.exceptionOrNull(), "[Download] Failed for game $gameId")
                         downloadInfo.setProgress(-1.0f)
+                        downloadInfo.setActive(false)
                     } else {
                         Timber.i("[Download] Completed successfully for game $gameId")
+                        downloadInfo.setProgress(1.0f)
+                        downloadInfo.setActive(false)
+                        // Remove from activeDownloads so UI knows download is complete
+                        instance.activeDownloads.remove(gameId)
                     }
                 } catch (e: Exception) {
                     Timber.e(e, "[Download] Exception for game $gameId")
                     downloadInfo.setProgress(-1.0f)
+                    downloadInfo.setActive(false)
                 } finally {
-                    // Keep in activeDownloads so UI can check status
-                    Timber.d("[Download] Finished for game $gameId, progress: ${downloadInfo.getProgress()}")
+                    Timber.d("[Download] Finished for game $gameId, progress: ${downloadInfo.getProgress()}, active: ${downloadInfo.isActive()}")
                 }
             }
 

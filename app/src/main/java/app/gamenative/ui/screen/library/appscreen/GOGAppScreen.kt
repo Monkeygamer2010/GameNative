@@ -87,6 +87,22 @@ class GOGAppScreen : BaseAppScreen() {
             Timber.tag(TAG).d("shouldShowInstallDialog: appId=$appId, result=$result")
             return result
         }
+
+        /**
+         * Formats bytes into a human-readable string (KB, MB, GB).
+         * Uses binary units (1024 base).
+         */
+        private fun formatBytes(bytes: Long): String {
+            val kb = 1024.0
+            val mb = kb * 1024
+            val gb = mb * 1024
+            return when {
+                bytes >= gb -> String.format(Locale.US, "%.1f GB", bytes / gb)
+                bytes >= mb -> String.format(Locale.US, "%.1f MB", bytes / mb)
+                bytes >= kb -> String.format(Locale.US, "%.1f KB", bytes / kb)
+                else -> "$bytes B"
+            }
+        }
     }
 
     @Composable
@@ -132,6 +148,16 @@ class GOGAppScreen : BaseAppScreen() {
         }
 
         val game = gogGame
+
+        // Format sizes for display
+        val sizeOnDisk = if (game != null && game.isInstalled && game.installSize > 0) {
+            formatBytes(game.installSize)
+        } else null
+
+        val sizeFromStore = if (game != null && game.downloadSize > 0) {
+            formatBytes(game.downloadSize)
+        } else null
+
         val displayInfo = GameDisplayInfo(
             name = game?.title ?: libraryItem.name,
             iconUrl = game?.iconUrl ?: libraryItem.iconHash,
@@ -139,9 +165,12 @@ class GOGAppScreen : BaseAppScreen() {
             gameId = libraryItem.gameId,  // Use gameId property which handles conversion
             appId = libraryItem.appId,
             releaseDate = 0L, // GOG uses string release dates, would need parsing
-            developer = game?.developer ?: "Unknown"
+            developer = game?.developer ?: "Unknown",
+            installLocation = game?.installPath?.takeIf { it.isNotEmpty() },
+            sizeOnDisk = sizeOnDisk,
+            sizeFromStore = sizeFromStore
         )
-        Timber.tag(TAG).d("Returning GameDisplayInfo: name=${displayInfo.name}, iconUrl=${displayInfo.iconUrl}, heroImageUrl=${displayInfo.heroImageUrl}, developer=${displayInfo.developer}")
+        Timber.tag(TAG).d("Returning GameDisplayInfo: name=${displayInfo.name}, iconUrl=${displayInfo.iconUrl}, heroImageUrl=${displayInfo.heroImageUrl}, developer=${displayInfo.developer}, installLocation=${displayInfo.installLocation}")
         return displayInfo
     }
 
@@ -174,8 +203,9 @@ class GOGAppScreen : BaseAppScreen() {
         // For GOG games, appId is already the numeric game ID
         val downloadInfo = GOGService.getDownloadInfo(libraryItem.appId)
         val progress = downloadInfo?.getProgress() ?: 0f
-        val downloading = downloadInfo != null && progress in 0f..0.99f
-        Timber.tag(TAG).d("isDownloading: appId=${libraryItem.appId}, hasDownloadInfo=${downloadInfo != null}, progress=$progress, result=$downloading")
+        val isActive = downloadInfo?.isActive() ?: false
+        val downloading = downloadInfo != null && isActive && progress < 1f
+        Timber.tag(TAG).d("isDownloading: appId=${libraryItem.appId}, hasDownloadInfo=${downloadInfo != null}, active=$isActive, progress=$progress, result=$downloading")
         return downloading
     }
 
@@ -200,6 +230,7 @@ class GOGAppScreen : BaseAppScreen() {
             // Cancel ongoing download
             Timber.tag(TAG).i("Cancelling GOG download for: ${libraryItem.appId}")
             downloadInfo.cancel()
+            GOGService.cleanupDownload(libraryItem.appId)
         } else if (installed) {
             // Already installed: launch game
             Timber.tag(TAG).i("GOG game already installed, launching: ${libraryItem.appId}")
@@ -273,6 +304,7 @@ class GOGAppScreen : BaseAppScreen() {
         if (isDownloading) {
             // Cancel/pause download
             Timber.tag(TAG).i("Pausing GOG download: ${libraryItem.appId}")
+            GOGService.cleanupDownload(libraryItem.appId)
             downloadInfo.cancel()
         } else {
             // Resume download (restart from beginning for now)
@@ -292,6 +324,7 @@ class GOGAppScreen : BaseAppScreen() {
         if (isDownloading) {
             // Cancel download immediately if currently downloading
             Timber.tag(TAG).i("Cancelling active download for GOG game: ${libraryItem.appId}")
+            GOGService.cleanupDownload(libraryItem.appId)
             downloadInfo.cancel()
             android.widget.Toast.makeText(
                 context,

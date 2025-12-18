@@ -225,6 +225,7 @@ internal fun AppScreenContent(
     downloadProgress: Float,
     hasPartialDownload: Boolean,
     isUpdatePending: Boolean,
+    downloadInfo: app.gamenative.data.DownloadInfo? = null,
     onDownloadInstallClick: () -> Unit,
     onPauseResumeClick: () -> Unit,
     onDeleteDownloadClick: () -> Unit,
@@ -510,7 +511,7 @@ internal fun AppScreenContent(
 
             // Download progress section
             if (isDownloading) {
-                val downloadInfo = SteamService.getAppDownloadInfo(displayInfo.gameId)
+                // downloadInfo passed from BaseAppScreen based on game source
                 val statusMessageFlow = downloadInfo?.getStatusMessageFlow()
                 val statusMessageState = statusMessageFlow?.collectAsState(initial = statusMessageFlow.value)
                 val statusMessage = statusMessageState?.value
@@ -919,8 +920,7 @@ private fun Preview_AppScreen() {
                 isDownloading = isDownloading,
                 downloadProgress = .50f,
                 hasPartialDownload = false,
-                isUpdatePending = false,
-                onDownloadInstallClick = { isDownloading = !isDownloading },
+                isUpdatePending = false,                downloadInfo = null,                onDownloadInstallClick = { isDownloading = !isDownloading },
                 onPauseResumeClick = { },
                 onDeleteDownloadClick = { },
                 onUpdateClick = { },
