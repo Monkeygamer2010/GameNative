@@ -65,7 +65,6 @@ object GOGAuthManager {
             if (result.isSuccess) {
                 val gogdlOutput = result.getOrNull() ?: ""
                 Timber.i("GOGDL command completed, checking authentication result...")
-                Timber.d("GOGDL output for auth: $gogdlOutput")
 
                 // Parse and validate the authentication result
                 return parseAuthenticationResult(authConfigPath, gogdlOutput)
@@ -98,8 +97,6 @@ object GOGAuthManager {
 
             if (result.isSuccess) {
                 val output = result.getOrNull() ?: ""
-                Timber.d("GOGDL credentials output: $output")
-
                 return parseCredentialsFromOutput(output)
             } else {
                 Timber.e("GOGDL credentials command failed")
@@ -136,7 +133,6 @@ object GOGAuthManager {
             }
 
             val output = result.getOrNull() ?: ""
-            Timber.d("GOGDL validation output: $output")
 
             try {
                 val credentialsJson = JSONObject(output.trim())
@@ -151,7 +147,7 @@ object GOGAuthManager {
                 Timber.d("Credentials validation successful")
                 return Result.success(true)
             } catch (e: Exception) {
-                Timber.e(e, "Failed to parse validation response: $output")
+                Timber.e(e, "Failed to parse validation response")
                 return Result.success(false)
             }
         } catch (e: Exception) {
@@ -224,28 +220,28 @@ object GOGAuthManager {
                 val authData = parseFullCredentialsFromFile(authConfigPath)
                 Timber.i("GOG authentication successful for user: ${authData.username}")
                 return Result.success(authData)
-            } else {
-                Timber.w("GOGDL returned success but no auth file created, using output data")
-                // Create credentials from GOGDL output
-                val credentials = createCredentialsFromJson(outputJson)
-                return Result.success(credentials)
             }
+
+            Timber.w("GOGDL returned success but no auth file created, using output data")
+            // Create credentials from GOGDL output
+            val credentials = createCredentialsFromJson(outputJson)
+            return Result.success(credentials)
+
         } catch (e: Exception) {
             Timber.e(e, "Failed to parse GOGDL output")
             // Fallback: check if auth file exists
             val authFile = File(authConfigPath)
-            if (authFile.exists()) {
-                try {
-                    val authData = parseFullCredentialsFromFile(authConfigPath)
-                    Timber.i("GOG authentication successful (fallback) for user: ${authData.username}")
-                    return Result.success(authData)
-                } catch (ex: Exception) {
-                    Timber.e(ex, "Failed to parse auth file")
-                    return Result.failure(Exception("Failed to parse authentication result: ${ex.message}"))
-                }
-            } else {
+            if (!authFile.exists()) {
                 Timber.e("GOG authentication failed: no auth file created and failed to parse output")
                 return Result.failure(Exception("Authentication failed: no credentials available"))
+            }
+            try {
+                val authData = parseFullCredentialsFromFile(authConfigPath)
+                Timber.i("GOG authentication successful (fallback) for user: ${authData.username}")
+                return Result.success(authData)
+            } catch (ex: Exception) {
+                Timber.e(ex, "Failed to parse auth file")
+                return Result.failure(Exception("Failed to parse authentication result: ${ex.message}"))
             }
         }
     }
@@ -274,7 +270,7 @@ object GOGAuthManager {
                 userId = userId,
             )
 
-            Timber.d("Got credentials for user: $username")
+            Timber.d("Got credentials for user")
             return Result.success(credentials)
         } catch (e: Exception) {
             Timber.e(e, "Failed to parse GOGDL credentials response")

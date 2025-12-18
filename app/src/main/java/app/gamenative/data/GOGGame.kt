@@ -83,16 +83,10 @@ data class GOGGame(
             ""
         }
 
-    /**
-     * Get the icon URL for this game
-     */
     val gogIconUrl: String
         get() = iconUrl.ifEmpty { gogImageUrl }
 }
 
-/**
- * GOG user credentials for authentication
- */
 data class GOGCredentials(
     val accessToken: String,
     val refreshToken: String,
@@ -100,9 +94,6 @@ data class GOGCredentials(
     val username: String,
 )
 
-/**
- * GOG download progress information
- */
 data class GOGDownloadInfo(
     val gameId: String,
     val totalSize: Long,
