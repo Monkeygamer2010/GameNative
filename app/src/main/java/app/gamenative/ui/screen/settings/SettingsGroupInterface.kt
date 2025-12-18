@@ -58,6 +58,7 @@ import com.winlator.core.AppUtils
 import app.gamenative.ui.component.dialog.MessageDialog
 import app.gamenative.ui.component.dialog.LoadingDialog
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -66,6 +67,75 @@ import kotlinx.coroutines.launch
 import app.gamenative.utils.LocaleHelper
 import app.gamenative.ui.component.dialog.GOGLoginDialog
 import app.gamenative.service.gog.GOGService
+import android.content.Context
+import kotlinx.coroutines.CoroutineScope
+import timber.log.Timber
+import app.gamenative.PluviaApp
+import app.gamenative.events.AndroidEvent
+
+/**
+ * Shared GOG authentication handler that manages the complete auth flow.
+ *
+ * @param context Android context for service operations
+ * @param authCode The OAuth authorization code
+ * @param coroutineScope Coroutine scope for async operations
+ * @param onLoadingChange Callback when loading state changes
+ * @param onError Callback when an error occurs (receives error message)
+ * @param onSuccess Callback when authentication succeeds (receives game count)
+ * @param onDialogClose Callback to close the login dialog
+ */
+private suspend fun handleGogAuthentication(
+    context: Context,
+    authCode: String,
+    coroutineScope: CoroutineScope,
+    onLoadingChange: (Boolean) -> Unit,
+    onError: (String?) -> Unit,
+    onSuccess: (Int) -> Unit,
+    onDialogClose: () -> Unit
+) {
+    onLoadingChange(true)
+    onError(null)
+
+    try {
+        Timber.d("[SettingsGOG]: Starting authentication...")
+        val result = GOGService.authenticateWithCode(context, authCode)
+
+        if (result.isSuccess) {
+            Timber.i("[SettingsGOG]: ✓ Authentication successful!")
+
+            // Start GOGService before syncing so service is running for operations
+            Timber.i("[SettingsGOG]: Starting GOGService")
+            GOGService.start(context)
+
+            // Sync the library using refreshLibrary which handles database updates
+            Timber.i("[SettingsGOG]: Syncing GOG library...")
+            val syncResult = GOGService.refreshLibrary(context)
+
+            if (syncResult.isSuccess) {
+                val count = syncResult.getOrNull() ?: 0
+                Timber.i("[SettingsGOG]: ✓ Synced $count games from GOG library")
+                onSuccess(count)
+            } else {
+                val error = syncResult.exceptionOrNull()?.message ?: "Failed to sync library"
+                Timber.w("[SettingsGOG]: Failed to sync library: $error")
+                // Don't fail authentication if library sync fails
+                onSuccess(0)
+            }
+
+            onLoadingChange(false)
+            onDialogClose()
+        } else {
+            val error = result.exceptionOrNull()?.message ?: "Authentication failed"
+            Timber.e("[SettingsGOG]: Authentication failed: $error")
+            onLoadingChange(false)
+            onError(error)
+        }
+    } catch (e: Exception) {
+        Timber.e(e, "[SettingsGOG]: Authentication exception: ${e.message}")
+        onLoadingChange(false)
+        onError(e.message ?: "Authentication failed")
+    }
+}
 
 @Composable
 fun SettingsGroupInterface(
@@ -134,56 +204,34 @@ fun SettingsGroupInterface(
     val coroutineScope = rememberCoroutineScope()
 
     // Listen for GOG OAuth callback
-    LaunchedEffect(Unit) {
-        timber.log.Timber.d("[SettingsGOG]: Setting up GOG auth code event listener")
-        app.gamenative.PluviaApp.events.on<app.gamenative.events.AndroidEvent.GOGAuthCodeReceived, Unit> { event ->
-            timber.log.Timber.i("[SettingsGOG]: ✓ Received GOG auth code event! Code: ${event.authCode.take(20)}...")
-            gogLoginLoading = true
-            gogLoginError = null
+    DisposableEffect(Unit) {
+        Timber.d("[SettingsGOG]: Setting up GOG auth code event listener")
+        val onGOGAuthCodeReceived: (AndroidEvent.GOGAuthCodeReceived) -> Unit = { event ->
+            Timber.i("[SettingsGOG]: ✓ Received GOG auth code event! Code: ${event.authCode.take(20)}...")
 
             coroutineScope.launch {
-                try {
-                    timber.log.Timber.d("[SettingsGOG]: Starting authentication...")
-                    val result = app.gamenative.service.gog.GOGService.authenticateWithCode(context, event.authCode)
-
-                    if (result.isSuccess) {
-                        timber.log.Timber.i("[SettingsGOG]: ✓ Authentication successful!")
-
-                        // Start GOGService before syncing so service is running for operations
-                        timber.log.Timber.i("[SettingsGOG]: Starting GOGService")
-                        GOGService.start(context)
-
-                        // Sync the library using refreshLibrary which handles database updates
-                        timber.log.Timber.i("[SettingsGOG]: Syncing GOG library...")
-                        val syncResult = GOGService.refreshLibrary(context)
-
-                        if (syncResult.isSuccess) {
-                            val count = syncResult.getOrNull() ?: 0
-                            timber.log.Timber.i("[SettingsGOG]: ✓ Synced $count games from GOG library")
-                            gogLibraryGameCount = count
-                        } else {
-                            val error = syncResult.exceptionOrNull()?.message ?: "Failed to sync library"
-                            timber.log.Timber.w("[SettingsGOG]: Failed to sync library: $error")
-                            // Don't fail authentication if library sync fails
-                        }
-
-                        gogLoginLoading = false
+                handleGogAuthentication(
+                    context = context,
+                    authCode = event.authCode,
+                    coroutineScope = coroutineScope,
+                    onLoadingChange = { gogLoginLoading = it },
+                    onError = { gogLoginError = it },
+                    onSuccess = { count ->
+                        gogLibraryGameCount = count
                         gogLoginSuccess = true
-                        openGOGLoginDialog = false
-                    } else {
-                        val error = result.exceptionOrNull()?.message ?: "Authentication failed"
-                        timber.log.Timber.e("[SettingsGOG]: Authentication failed: $error")
-                        gogLoginLoading = false
-                        gogLoginError = error
-                    }
-                } catch (e: Exception) {
-                    timber.log.Timber.e(e, "[SettingsGOG]: Authentication exception: ${e.message}")
-                    gogLoginLoading = false
-                    gogLoginError = e.message ?: "Authentication failed"
-                }
+                    },
+                    onDialogClose = { openGOGLoginDialog = false }
+                )
             }
         }
-        timber.log.Timber.d("[SettingsGOG]: GOG auth code event listener registered")
+
+        PluviaApp.events.on<AndroidEvent.GOGAuthCodeReceived, Unit>(onGOGAuthCodeReceived)
+        Timber.d("[SettingsGOG]: GOG auth code event listener registered")
+
+        onDispose {
+            PluviaApp.events.off<AndroidEvent.GOGAuthCodeReceived, Unit>(onGOGAuthCodeReceived)
+            Timber.d("[SettingsGOG]: GOG auth code event listener unregistered")
+        }
     }
 
     SettingsGroup(title = { Text(text = stringResource(R.string.settings_interface_title)) }) {
@@ -255,11 +303,11 @@ fun SettingsGroupInterface(
     }
 
     // GOG Integration
-    SettingsGroup(title = { Text(text = "GOG Integration") }) {
+    SettingsGroup(title = { Text(text = stringResource(R.string.gog_integration_title)) }) {
         SettingsMenuLink(
             colors = settingsTileColorsAlt(),
-            title = { Text(text = "GOG Login") },
-            subtitle = { Text(text = "Sign in to your GOG account") },
+            title = { Text(text = stringResource(R.string.gog_settings_login_title)) },
+            subtitle = { Text(text = stringResource(R.string.gog_settings_login_subtitle)) },
             onClick = {
                 openGOGLoginDialog = true
                 gogLoginError = null
@@ -269,14 +317,14 @@ fun SettingsGroupInterface(
 
         SettingsMenuLink(
             colors = settingsTileColorsAlt(),
-            title = { Text(text = "Sync GOG Library") },
+            title = { Text(text = stringResource(R.string.gog_settings_sync_title)) },
             subtitle = {
                 Text(
                     text = when {
-                        gogLibrarySyncing -> "Syncing..."
-                        gogLibrarySyncError != null -> "Error: ${gogLibrarySyncError}"
-                        gogLibrarySyncSuccess -> "✓ Synced ${gogLibraryGameCount} games"
-                        else -> "Fetch your GOG games library"
+                        gogLibrarySyncing -> stringResource(R.string.gog_settings_sync_subtitle_syncing)
+                        gogLibrarySyncError != null -> stringResource(R.string.gog_settings_sync_subtitle_error, gogLibrarySyncError!!)
+                        gogLibrarySyncSuccess -> stringResource(R.string.gog_settings_sync_subtitle_success, gogLibraryGameCount)
+                        else -> stringResource(R.string.gog_settings_sync_subtitle_default)
                     }
                 )
             },
@@ -288,7 +336,7 @@ fun SettingsGroupInterface(
 
                 coroutineScope.launch {
                     try {
-                        timber.log.Timber.i("[SettingsGOG]: Syncing GOG library...")
+                        Timber.i("[SettingsGOG]: Syncing GOG library...")
 
                         // Use GOGService.refreshLibrary() which handles everything
                         val result = GOGService.refreshLibrary(context)
@@ -296,18 +344,18 @@ fun SettingsGroupInterface(
                         if (result.isSuccess) {
                             val count = result.getOrNull() ?: 0
                             gogLibraryGameCount = count
-                            timber.log.Timber.i("[SettingsGOG]: ✓ Successfully synced $count games from GOG")
+                            Timber.i("[SettingsGOG]: ✓ Successfully synced $count games from GOG")
 
                             gogLibrarySyncing = false
                             gogLibrarySyncSuccess = true
                         } else {
                             val error = result.exceptionOrNull()?.message ?: "Failed to sync library"
-                            timber.log.Timber.e("[SettingsGOG]: Library sync failed: $error")
+                            Timber.e("[SettingsGOG]: Library sync failed: $error")
                             gogLibrarySyncing = false
                             gogLibrarySyncError = error
                         }
                     } catch (e: Exception) {
-                        timber.log.Timber.e(e, "[SettingsGOG]: Library sync exception: ${e.message}")
+                        Timber.e(e, "[SettingsGOG]: Library sync exception: ${e.message}")
                         gogLibrarySyncing = false
                         gogLibrarySyncError = e.message ?: "Sync failed"
                     }
@@ -596,46 +644,19 @@ fun SettingsGroupInterface(
             gogLoginLoading = false
         },
         onAuthCodeClick = { authCode ->
-            gogLoginLoading = true
-            gogLoginError = null
             coroutineScope.launch {
-                try {
-                    timber.log.Timber.d("[SettingsGOG]: Starting manual authentication...")
-                    val result = GOGService.authenticateWithCode(context, authCode)
-
-                    if (result.isSuccess) {
-                        timber.log.Timber.i("[SettingsGOG]: ✓ Manual authentication successful!")
-
-                        // Start GOGService before syncing so service is running for operations
-                        timber.log.Timber.i("[SettingsGOG]: Starting GOGService")
-                        GOGService.start(context)
-
-                        // Sync the library
-                        timber.log.Timber.i("[SettingsGOG]: Syncing GOG library...")
-                        val syncResult = GOGService.refreshLibrary(context)
-
-                        if (syncResult.isSuccess) {
-                            val count = syncResult.getOrNull() ?: 0
-                            timber.log.Timber.i("[SettingsGOG]: ✓ Synced $count games from GOG library")
-                            gogLibraryGameCount = count
-                        } else {
-                            val error = syncResult.exceptionOrNull()?.message ?: "Failed to sync library"
-                            timber.log.Timber.w("[SettingsGOG]: Failed to sync library: $error")
-                            // Don't fail authentication if library sync fails
-                        }
-
-                        gogLoginLoading = false
+                handleGogAuthentication(
+                    context = context,
+                    authCode = authCode,
+                    coroutineScope = coroutineScope,
+                    onLoadingChange = { gogLoginLoading = it },
+                    onError = { gogLoginError = it },
+                    onSuccess = { count ->
+                        gogLibraryGameCount = count
                         gogLoginSuccess = true
-                        openGOGLoginDialog = false
-                    } else {
-                        gogLoginLoading = false
-                        gogLoginError = result.exceptionOrNull()?.message ?: "Authentication failed"
-                    }
-                } catch (e: Exception) {
-                    timber.log.Timber.e(e, "[SettingsGOG]: Manual authentication exception: ${e.message}")
-                    gogLoginLoading = false
-                    gogLoginError = e.message ?: "Authentication failed"
-                }
+                    },
+                    onDialogClose = { openGOGLoginDialog = false }
+                )
             }
         },
         isLoading = gogLoginLoading,
@@ -650,8 +671,8 @@ fun SettingsGroupInterface(
             onConfirmClick = { gogLoginSuccess = false },
             confirmBtnText = "OK",
             icon = Icons.Default.Login,
-            title = "Login Successful",
-            message = "You are now signed in to GOG."
+            title = stringResource(R.string.gog_login_success_title),
+            message = stringResource(R.string.gog_login_success_message)
         )
     }
 }
