@@ -926,7 +926,9 @@ object ContainerUtils {
      * Handles formats like:
      * - STEAM_123456 -> 123456
      * - CUSTOM_GAME_571969840 -> 571969840
+     * - GOG_19283103 -> 19283103
      * - STEAM_123456(1) -> 123456
+     * - 19283103 -> 19283103 (legacy GOG format)
      */
     fun extractGameIdFromContainerId(containerId: String): Int {
         // Remove duplicate suffix like (1), (2) if present
@@ -950,13 +952,13 @@ object ContainerUtils {
 
     /**
      * Extracts the game source from a container ID string
-     * Note: GOG games use plain numeric IDs without prefix
      */
     fun extractGameSourceFromContainerId(containerId: String): GameSource {
         return when {
             containerId.startsWith("STEAM_") -> GameSource.STEAM
             containerId.startsWith("CUSTOM_GAME_") -> GameSource.CUSTOM_GAME
-            // GOG games use plain numeric IDs - check if it's just a number
+            containerId.startsWith("GOG_") -> GameSource.GOG
+            // Legacy fallback for old GOG containers without prefix (numeric only)
             containerId.toIntOrNull() != null -> GameSource.GOG
             // Add other platforms here..
             else -> GameSource.STEAM // default fallback

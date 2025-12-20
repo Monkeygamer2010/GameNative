@@ -174,6 +174,8 @@ class GOGManager @Inject constructor(
         }
     }
 
+    // TODO: Optimisation: Rather than grab ALL game details at once, we should batch process X amount at a time
+    // This will allow us to update the UI more often and be more dynamic.
     /**
      * Fetch the user's GOG library (list of owned games)
      * Returns a list of GOGGame objects with basic metadata
