@@ -145,41 +145,48 @@ class GOGManager @Inject constructor(
             // Step 1: Get all the Ids from teh Python bridge.
             // Step 2, iterate over each one and after X amount, save to the DB (Let's have a CONST for that batch size). Start with 40 or so.
             // Step 3: Send event that allows the library to update the screen.
-            var gameIdList = getGameIdList()
-             return@withContext Result.failure("TESTING....")
-        //     val listResult = listGames(context)
+            var gameIdList = listGameIds(context)
 
-        //     if (listResult.isFailure) {
-        //         val error = listResult.exceptionOrNull()
-        //         Timber.e(error, "Failed to fetch games from GOG: ${error?.message}")
-        //         return@withContext Result.failure(error ?: Exception("Failed to fetch GOG library"))
-        //     }
+            if(!gameIdList.isSuccess){
+                val error = gameIdList.exceptionOrNull()
+                Timber.e(error, "Failed to fetch GOG game IDs: ${error?.message}")
+                return@withContext Result.failure(error ?: Exception("Failed to fetch GOG game IDs"))
+            }
 
-        //     val games = listResult.getOrNull() ?: emptyList()
-        //     Timber.tag("GOG").i("Successfully fetched ${games.size} games from GOG")
+            val gameIds = gameIdList.getOrNull() ?: emptyList()
+            Timber.tag("GOG").i("Successfully fetched ${gameIds.size} game IDs from GOG")
 
-        //     if (games.isEmpty()) {
-        //         Timber.w("No games found in GOG library")
-        //         return@withContext Result.success(0)
-        //     }
+            if (gameIds.isEmpty()) {
+                Timber.w("No games found in GOG library")
+                return@withContext Result.success(0)
+            }
 
-        //     // Update database using upsert to preserve install status
-        //     Timber.d("Upserting ${games.size} games to database...")
-        //     gogGameDao.upsertPreservingInstallStatus(games)
-
-        //     // Scan for existing installations on filesystem
-        //     Timber.d("Scanning for existing installations...")
-        //     val detectedCount = detectAndUpdateExistingInstallations()
-        //     if (detectedCount > 0) {
-        //         Timber.i("Detected and updated $detectedCount existing installations")
-        //     }
-
-        //     Timber.tag("GOG").i("Successfully refreshed GOG library with ${games.size} games")
-        //     Result.success(games.size)
-        // } catch (e: Exception) {
-        //     Timber.e(e, "Failed to refresh GOG library")
-        //     Result.failure(e)
-        // }
+            var totalProcessed = 0
+            
+            for(id in gameIds) { 
+                val singleGameResult = refreshSingleGame(id, context)
+                if(singleGameResult.isSuccess){
+                    val authConfigPath = GOGAuthManager.getAuthConfigPath(context)
+                    val result = GOGPythonBridge.executeCommand("--auth-config-path", authConfigPath, "game-details", "--pretty")
+                    if(result != null){
+                        Timer.tag("GOG").i("Got Game Details for ID: $id")
+                        var game = parseGameObject(result)
+                        insertGame(game)
+                        Timber.tag("GOG").i("Refreshed GOG game ID $id: ${game.title}")
+                        totalProcessed++
+                    } else {
+                        Timber.w("GOG game ID $id not found in library after refresh")
+                    }
+                } else {
+                    val error = singleGameResult.exceptionOrNull()
+                    Timber.e(error, "Failed to refresh single GOG game ID $id: ${error?.message}")
+                }
+            }
+            Timber.tag("GOG").i("Successfully refreshed GOG library with $totalProcessed games")
+            return@withContext Result.success(totalProcessed)
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to refresh GOG library")
+        }
     }
 
     // TODO: Optimisation: Rather than grab ALL game details at once, we should batch process X amount at a time
