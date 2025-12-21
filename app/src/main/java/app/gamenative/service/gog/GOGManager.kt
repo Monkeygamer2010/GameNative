@@ -71,7 +71,7 @@ class GOGManager @Inject constructor(
 
     // Thread-safe cache for download sizes
     private val downloadSizeCache = ConcurrentHashMap<String, String>()
-
+    private val REFRESH_BATCH_SIZE = 20
     suspend fun getGameById(gameId: String): GOGGame? {
         return withContext(Dispatchers.IO) {
             try {
@@ -188,8 +188,7 @@ class GOGManager @Inject constructor(
                     Timber.e(e, "Failed to parse game details for ID: $id")
                 }
 
-                // Batch upsert every 20 games or at the end
-                if ((index + 1) % 20 == 0 || index == gameIds.size - 1) {
+                if ((index + 1) % REFRESH_BATCH_SIZE == 0 || index == gameIds.size - 1) {
                     if (games.isNotEmpty()) {
                         gogGameDao.upsertMultipleGamesPreservingInstallStatus(games)
                         Timber.tag("GOG").d("Batch inserted ${games.size} games (processed ${index + 1}/${gameIds.size})")
