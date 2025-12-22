@@ -111,7 +111,7 @@ class LibraryViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             gogGameDao.getAll().collect { games ->
                 Timber.tag("LibraryViewModel").d("Collecting ${games.size} GOG games")
-                if(gogGameList.size != games.size) {
+                 if(gogGameList.size != games.size || gogGameList != games) {
                     gogGameList = games
                     onFilterApps(paginationCurrentPage)
                 }
