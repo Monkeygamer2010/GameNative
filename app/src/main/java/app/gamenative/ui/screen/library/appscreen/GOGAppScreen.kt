@@ -128,8 +128,10 @@ class GOGAppScreen : BaseAppScreen() {
             app.gamenative.PluviaApp.events.on<app.gamenative.events.AndroidEvent.LibraryInstallStatusChanged, Unit>(installListener)
         }
 
-        val gogGame = remember(gameId, refreshTrigger) {
-            val game = GOGService.getGOGGameOf(gameId)
+        var gogGame by remember(gameId, refreshTrigger) { mutableStateOf<GOGGame?>(null) }
+        LaunchedEffect(gameId, refreshTrigger) {
+            gogGame = GOGService.getGOGGameOf(gameId)
+            val game = gogGame
             if (game != null) {
                 Timber.tag(TAG).d("""
                     |=== GOG Game Object ===

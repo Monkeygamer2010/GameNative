@@ -532,7 +532,7 @@ object ContainerUtils {
             GameSource.GOG -> {
                 // For GOG games, map the specific game directory to A: drive
                 val gameId = extractGameIdFromContainerId(appId)
-                val game = runBlocking { GOGService.getGOGGameOf(gameId.toString()) }
+                val game = GOGService.getGOGGameOf(gameId.toString())
                 if (game != null) {
                     val gameInstallPath = GOGConstants.getGameInstallPath(game.title)
                     val drive: Char = if (defaultDrives.contains("A:")) {

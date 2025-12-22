@@ -163,8 +163,8 @@ class GOGService : Service() {
         // GAME & LIBRARY OPERATIONS - Delegate to instance GOGManager
         // ==========================================================================
 
-        fun getGOGGameOf(gameId: String): GOGGame? {
-            return runBlocking(Dispatchers.IO) {
+        suspend fun getGOGGameOf(gameId: String): GOGGame? {
+            return withContext(Dispatchers.IO) {
                 getInstance()?.gogManager?.getGameById(gameId)
             }
         }
