@@ -140,12 +140,12 @@ fun GameManagerDialog(
         val availableBytes = StorageUtils.getAvailableSpace(SteamService.defaultStoragePath)
 
         // For Base Game
-        val baseGameInstallBytes = appInfo.depots
+        val baseGameInstallBytes = downloadableDepots
             .filter { (_, depot) ->
                 depot.dlcAppId == INVALID_APP_ID
             }.values.sumOf { it.manifests["public"]?.size ?: 0 }
 
-        val baseGameDownloadBytes = appInfo.depots
+        val baseGameDownloadBytes = downloadableDepots
             .filter { (_, depot) ->
                 depot.dlcAppId == INVALID_APP_ID
             }.values.sumOf { it.manifests["public"]?.download ?: 0 }

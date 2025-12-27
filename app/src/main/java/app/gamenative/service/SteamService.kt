@@ -146,6 +146,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import android.util.Base64
 import app.gamenative.db.dao.EncryptedAppTicketDao
+import app.gamenative.utils.printAllKeyValues
 import kotlinx.coroutines.flow.update
 import java.io.InputStream
 import java.io.OutputStream
@@ -1069,6 +1070,7 @@ class SteamService : Service(), IChallengeUrlChanged {
             if (downloadableDepots.isEmpty()) return null
 
             val indirectDlcAppIds = getDownloadableDlcAppsOf(appId).orEmpty().map { it.id }
+            val hiddenDlcAppIds = getHiddenDlcAppsOf(appId).orEmpty().map { it.id }
 
             // Depots from Main game
             val mainDepots = getMainAppDepots(appId)
@@ -1098,10 +1100,27 @@ class SteamService : Service(), IChallengeUrlChanged {
             val dlcAppIds = dlcAppIds.toMutableList()
             downloadingAppIds.add(appId)
 
+            // If there are no DLC depots, download the main app only
             if (dlcAppDepots.isEmpty()) {
                 dlcAppIds.clear()
                 downloadingAppIds.clear()
                 downloadingAppIds.add(appId)
+            }
+
+            // There are some apps, the dlc depots does not have dlcAppId in the data, need to set it back
+            var mainAppDlcIds = mutableListOf<Int>()
+            val appInfo = getAppInfoOf(appId)
+            if (appInfo != null) {
+                // for each of the dlcAppId found in main depots, filter the count = 1, add that dlcAppId to dlcAppIds
+                val checkingAppDlcIds = appInfo.depots.filter { it.value.dlcAppId != INVALID_APP_ID }.map { it.value.dlcAppId }
+                checkingAppDlcIds.forEach { checkingDlcId ->
+                    val checkMap = appInfo.depots.filter { it.value.dlcAppId == checkingDlcId }
+                    if (checkMap.count() == 1 &&
+                        checkMap[checkMap.keys.first()]!!.osList.contains(OS.none) &&
+                        hiddenDlcAppIds.contains(checkingDlcId)) {
+                        mainAppDlcIds.add(checkingDlcId)
+                    }
+                }
             }
 
             Timber.i("selectedDepots is empty? " + selectedDepots.isEmpty())
@@ -1195,7 +1214,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                         val mainAppDepotIdToIndex = mainAppDepotIds.mapIndexed { index, depotId -> depotId to index }.toMap()
 
                         // Create listener
-                        val mainAppListener = AppDownloadListener(di, mainAppDepotIdToIndex, appId, dlcAppIds,mainAppDepotIds, appDirPath)
+                        val mainAppListener = AppDownloadListener(di, mainAppDepotIdToIndex, appId, mainAppDlcIds,mainAppDepotIds, appDirPath)
                         depotDownloader.addListener(mainAppListener)
 
                         // Create AppItem with only mandatory appId
@@ -1277,7 +1296,7 @@ class SteamService : Service(), IChallengeUrlChanged {
             private val downloadInfo: DownloadInfo,
             private val depotIdToIndex: Map<Int, Int>,
             private val downloadingAppId: Int,
-            private val dlcAppIds: List<Int>,
+            private val selectedDlcAppIds: List<Int>,
             private val entitledDepotIds: List<Int>,
             private val appDirPath: String,
         ) : IDownloadListener {
@@ -1295,16 +1314,13 @@ class SteamService : Service(), IChallengeUrlChanged {
             override fun onDownloadCompleted(item: DownloadItem) {
                 Timber.i("Item ${item.appId} download completed")
 
-                val appDirPath = getAppDirPath(downloadInfo.gameId)
-
                 // Update database
                 runBlocking {
-                    // Update Main Game Saved AppInfo
-                    if (downloadInfo.gameId == item.appId &&
-                        MarkerUtils.hasMarker(appDirPath, Marker.MODIFYING_MARKER)) {
-                        val appInfo = getInstalledApp(downloadInfo.gameId)!!
+                    // Update Saved AppInfo
+                    if (MarkerUtils.hasMarker(appDirPath, Marker.MODIFYING_MARKER)) {
+                        val appInfo = getInstalledApp(downloadingAppId)!!
                         val updatedDownloadedDepots = (appInfo.downloadedDepots + entitledDepotIds).distinct()
-                        val updatedDlcDepots = (appInfo.dlcDepots + dlcAppIds).distinct()
+                        val updatedDlcDepots = (appInfo.dlcDepots + selectedDlcAppIds).distinct()
 
                         instance?.appInfoDao?.update(
                             AppInfo(
@@ -1320,7 +1336,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                                 downloadingAppId,
                                 isDownloaded = true,
                                 downloadedDepots = entitledDepotIds,
-                                dlcDepots = dlcAppIds,
+                                dlcDepots = selectedDlcAppIds,
                             ),
                         )
                     }
@@ -1331,7 +1347,7 @@ class SteamService : Service(), IChallengeUrlChanged {
 
                 // All downloading appIds are removed
                 if (downloadInfo.downloadingAppIds.isEmpty()) {
-                    // Handle completion: add marker, update database
+                    // Handle completion: add markers
                     MarkerUtils.addMarker(appDirPath, Marker.DOWNLOAD_COMPLETE_MARKER)
                     PluviaApp.events.emit(AndroidEvent.LibraryInstallStatusChanged(downloadInfo.gameId))
 
