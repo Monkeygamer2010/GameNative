@@ -100,6 +100,10 @@ fun GameManagerDialog(
         SteamService.getHiddenDlcAppsOf(gameId).orEmpty().map { it.id }.filter { id -> appInfo.depots[id] == null }
     }
 
+    val mainAppDlcIdsWithoutProperDepotDlcIds = remember(gameId) {
+        SteamService.getMainAppDlcIdsWithoutProperDepotDlcIds(gameId).toList()
+    }
+
     LaunchedEffect(visible) {
         scrollState.animateScrollTo(0)
 
@@ -198,9 +202,9 @@ fun GameManagerDialog(
         }
 
         if (installedApp != null) {
-            val allAppIds = allDownloadableApps.map { it.first }
-            val fixForSpecialDlcIds = installedDlcIds.filter { allAppIds.contains(it) }
-            return (selectedAppIds.filter { it.value }.size - fixForSpecialDlcIds.size - 1) > 0 // -1 for main app
+            val installed = installedDlcIds.toSet() - mainAppDlcIdsWithoutProperDepotDlcIds.toSet()
+            val realSelectedAppIds = selectedAppIds.filter { it.value }.keys - installed
+            return (realSelectedAppIds.size - 1) > 0 // -1 for main app
         }
 
         return selectedAppIds.filter { it.value }.isNotEmpty()

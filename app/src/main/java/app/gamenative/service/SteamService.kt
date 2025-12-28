@@ -491,6 +491,30 @@ class SteamService : Service(), IChallengeUrlChanged {
             }.toMap()
         }
 
+        fun getMainAppDlcIdsWithoutProperDepotDlcIds(appId: Int): MutableList<Int> {
+            val mainAppDlcIds = mutableListOf<Int>()
+            val hiddenDlcAppIds = getHiddenDlcAppsOf(appId).orEmpty().map { it.id }
+
+            val appInfo = getAppInfoOf(appId)
+            if (appInfo != null) {
+                // for each of the dlcAppId found in main depots, filter the count = 1, add that dlcAppId to dlcAppIds
+                val checkingAppDlcIds = appInfo.depots.filter { it.value.dlcAppId != INVALID_APP_ID }.map { it.value.dlcAppId }.distinct()
+                checkingAppDlcIds.forEach { checkingDlcId ->
+                    val checkMap = appInfo.depots.filter { it.value.dlcAppId == checkingDlcId }
+                    if (checkMap.size == 1) {
+                        val depotInfo = checkMap[checkMap.keys.first()]!!
+                        if (depotInfo.osList.contains(OS.none) &&
+                            depotInfo.manifests.isEmpty() &&
+                            hiddenDlcAppIds.isNotEmpty() && hiddenDlcAppIds.contains(checkingDlcId)) {
+                            mainAppDlcIds.add(checkingDlcId)
+                        }
+                    }
+                }
+            }
+
+            return mainAppDlcIds
+        }
+
         /**
          * Refresh the owned games list by querying Steam, diffing with the local DB, and
          * queueing PICS requests for anything new so metadata gets populated.
@@ -1065,7 +1089,6 @@ class SteamService : Service(), IChallengeUrlChanged {
             if (downloadableDepots.isEmpty()) return null
 
             val indirectDlcAppIds = getDownloadableDlcAppsOf(appId).orEmpty().map { it.id }
-            val hiddenDlcAppIds = getHiddenDlcAppsOf(appId).orEmpty().map { it.id }
 
             // Depots from Main game
             val mainDepots = getMainAppDepots(appId)
@@ -1098,20 +1121,7 @@ class SteamService : Service(), IChallengeUrlChanged {
             downloadingAppIds.add(appId)
 
             // There are some apps, the dlc depots does not have dlcAppId in the data, need to set it back
-            var mainAppDlcIds = mutableListOf<Int>()
-            val appInfo = getAppInfoOf(appId)
-            if (appInfo != null) {
-                // for each of the dlcAppId found in main depots, filter the count = 1, add that dlcAppId to dlcAppIds
-                val checkingAppDlcIds = appInfo.depots.filter { it.value.dlcAppId != INVALID_APP_ID }.map { it.value.dlcAppId }
-                checkingAppDlcIds.forEach { checkingDlcId ->
-                    val checkMap = appInfo.depots.filter { it.value.dlcAppId == checkingDlcId }
-                    if (checkMap.count() == 1 &&
-                        checkMap[checkMap.keys.first()]!!.osList.contains(OS.none) &&
-                        hiddenDlcAppIds.contains(checkingDlcId)) {
-                        mainAppDlcIds.add(checkingDlcId)
-                    }
-                }
-            }
+            val mainAppDlcIds = getMainAppDlcIdsWithoutProperDepotDlcIds(appId)
 
             // If there are no DLC depots, download the main app only
             if (dlcAppDepots.isEmpty()) {
@@ -1344,7 +1354,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                 }
 
                 // Remove completed appId from downloadInfo.dlcAppIds
-                downloadInfo.downloadingAppIds.removeIf { it != downloadingAppId }
+                downloadInfo.downloadingAppIds.removeIf { it == downloadingAppId }
 
                 // All downloading appIds are removed
                 if (downloadInfo.downloadingAppIds.isEmpty()) {
