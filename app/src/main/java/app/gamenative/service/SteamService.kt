@@ -1100,13 +1100,6 @@ class SteamService : Service(), IChallengeUrlChanged {
             val dlcAppIds = dlcAppIds.toMutableList()
             downloadingAppIds.add(appId)
 
-            // If there are no DLC depots, download the main app only
-            if (dlcAppDepots.isEmpty()) {
-                dlcAppIds.clear()
-                downloadingAppIds.clear()
-                downloadingAppIds.add(appId)
-            }
-
             // There are some apps, the dlc depots does not have dlcAppId in the data, need to set it back
             var mainAppDlcIds = mutableListOf<Int>()
             val appInfo = getAppInfoOf(appId)
@@ -1121,6 +1114,17 @@ class SteamService : Service(), IChallengeUrlChanged {
                         mainAppDlcIds.add(checkingDlcId)
                     }
                 }
+            }
+
+            // If there are no DLC depots, download the main app only
+            if (dlcAppDepots.isEmpty()) {
+                // Because all dlcIDs are coming from main depots, need to add the dlcID to main app in order to save it to db after finish download
+                mainAppDlcIds.addAll(dlcAppIds)
+
+                // Refresh id List, so only main app is downloaded
+                dlcAppIds.clear()
+                downloadingAppIds.clear()
+                downloadingAppIds.add(appId)
             }
 
             Timber.i("selectedDepots is empty? " + selectedDepots.isEmpty())

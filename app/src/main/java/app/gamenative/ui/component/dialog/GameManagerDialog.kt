@@ -189,7 +189,9 @@ fun GameManagerDialog(
         }
 
         if (installedApp != null) {
-            return (selectedAppIds.filter { it.value }.size - installedDlcIds.size - 1) > 0 // -1 for main app
+            val allAppIds = allDownloadableApps.map { it.first }
+            val fixForSpecialDlcIds = installedDlcIds.filter { allAppIds.contains(it) }
+            return (selectedAppIds.filter { it.value }.size - fixForSpecialDlcIds.size - 1) > 0 // -1 for main app
         }
 
         return selectedAppIds.filter { it.value }.isNotEmpty()
