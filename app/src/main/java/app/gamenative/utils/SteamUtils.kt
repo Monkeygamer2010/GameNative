@@ -773,11 +773,11 @@ object SteamUtils {
                 appendedDlcIds.add(it)
             }
 
-            dlcApps?.forEach { app ->
-                val dlcDepots = SteamService.getInstalledDepotsOf(app.id)
-                dlcDepots?.forEach {
-                    appendLine("$it=dlc$it")
-                    appendedDlcIds.add(it)
+            dlcApps?.forEach { dlcApp ->
+                val installedDlcApp = SteamService.getInstalledApp(dlcApp.id)
+                if (installedDlcApp != null) {
+                    appendLine("${dlcApp.id}=dlc${dlcApp.id}")
+                    appendedDlcIds.add(dlcApp.id)
                 }
             }
 

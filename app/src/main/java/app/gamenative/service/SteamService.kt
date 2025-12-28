@@ -1102,13 +1102,13 @@ class SteamService : Service(), IChallengeUrlChanged {
             var mainAppDepots = mainDepots.filter { (_, depot) ->
                 depot.dlcAppId == INVALID_APP_ID
             } + mainDepots.filter { (_, depot) ->
-                dlcAppIds.contains(depot.dlcAppId) && !indirectDlcAppIds.contains(depot.dlcAppId)
+                dlcAppIds.contains(depot.dlcAppId) && depot.manifests.isNotEmpty()
             }
 
             // Depots from DLC App
             val dlcAppDepots = downloadableDepots.filter { (_, depot) ->
                 !mainAppDepots.map { it.key }.contains(depot.depotId) &&
-                dlcAppIds.contains(depot.dlcAppId) && indirectDlcAppIds.contains(depot.dlcAppId)
+                dlcAppIds.contains(depot.dlcAppId) && indirectDlcAppIds.contains(depot.dlcAppId) && depot.manifests.isNotEmpty()
             }
 
             if (MarkerUtils.hasMarker(appDirPath, Marker.MODIFYING_MARKER)) {
