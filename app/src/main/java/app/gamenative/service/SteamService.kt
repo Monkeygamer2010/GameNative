@@ -1125,7 +1125,11 @@ class SteamService : Service(), IChallengeUrlChanged {
             downloadingAppIds.addAll(dlcAppIds)
 
             val calculatedDlcAppIds = dlcAppIds.toMutableList()
-            downloadingAppIds.add(appId)
+
+            // Add main app ID if there are main app depots
+            if (mainAppDepots.isNotEmpty()) {
+                downloadingAppIds.add(appId)
+            }
 
             // There are some apps, the dlc depots does not have dlcAppId in the data, need to set it back
             val mainAppDlcIds = getMainAppDlcIdsWithoutProperDepotDlcIds(appId)
