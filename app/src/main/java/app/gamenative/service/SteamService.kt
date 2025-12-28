@@ -1336,9 +1336,10 @@ class SteamService : Service(), IChallengeUrlChanged {
 
                 // Update database
                 runBlocking {
+                    val appInfo = getInstalledApp(downloadingAppId)
+
                     // Update Saved AppInfo
-                    if (MarkerUtils.hasMarker(appDirPath, Marker.MODIFYING_MARKER)) {
-                        val appInfo = getInstalledApp(downloadingAppId)!!
+                    if (MarkerUtils.hasMarker(appDirPath, Marker.MODIFYING_MARKER) && appInfo != null) {
                         val updatedDownloadedDepots = (appInfo.downloadedDepots + entitledDepotIds).distinct()
                         val updatedDlcDepots = (appInfo.dlcDepots + selectedDlcAppIds).distinct()
 
