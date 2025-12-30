@@ -768,21 +768,27 @@ object SteamUtils {
         val appIniContent = buildString {
             appendLine("[app::dlcs]")
             appendLine("unlock_all=${if (forceDlc) 1 else 0}")
-            dlcIds?.forEach {
+            dlcIds?.sorted()?.forEach {
                 appendLine("$it=dlc$it")
                 appendedDlcIds.add(it)
             }
 
             dlcApps?.forEach { dlcApp ->
                 val installedDlcApp = SteamService.getInstalledApp(dlcApp.id)
-                if (installedDlcApp != null) {
+                if (installedDlcApp != null && !appendedDlcIds.contains(dlcApp.id)) {
                     appendLine("${dlcApp.id}=dlc${dlcApp.id}")
                     appendedDlcIds.add(dlcApp.id)
                 }
             }
 
             // only add hidden dlc apps if not found in appendedDlcIds
-            hiddenDlcApps?.forEach { if (!appendedDlcIds.contains(it.id)) appendLine("${it.id}=dlc${it.id}") }
+            hiddenDlcApps?.forEach { hiddenDlcApp ->
+                if (!appendedDlcIds.contains(hiddenDlcApp.id) &&
+                    // only add hidden dlc apps if it is not a DLC of the main app
+                    appInfo!!.depots.filter { (_, depot) -> depot.dlcAppId == hiddenDlcApp.id }.size <= 1) {
+                    appendLine("${hiddenDlcApp.id}=dlc${hiddenDlcApp.id}")
+                }
+            }
 
             // Add cloud save config sections if appInfo exists
             if (appInfo != null) {
