@@ -28,7 +28,7 @@ public final class FEXCoreManager {
 
     /**
      * Delete existing FEXCore config files for the given container.
-     * Removes both container-level config files and app-level config directories.
+     * Removes container-level config files and ensures Steam app configs exist.
      */
     public static void deleteConfigFiles(Context context, String containerId) {
         try {
@@ -38,10 +38,41 @@ public final class FEXCoreManager {
             if (containerConfig.exists()) {
                 containerConfig.delete();
             }
-            // Delete app-level config directory
+            // Ensure AppConfig directory exists and create Steam config files
             File appConfigDir = new File(context.getFilesDir(), "imagefs/home/xuser/.fex-emu/AppConfig");
-            if (appConfigDir.exists() && appConfigDir.isDirectory()) {
-                FileUtils.delete(appConfigDir);
+            if (!appConfigDir.exists()) {
+                appConfigDir.mkdirs();
+            }
+            
+            // Steam FEXCore config JSON content
+            String steamConfigJson = "{\n" +
+                "  \"Config\": {\n" +
+                "    \"Multiblock\": \"0\",\n" +
+                "    \"MaxInst\": \"5000\",\n" +
+                "    \"HostFeatures\": \"off\",\n" +
+                "    \"SmallTSCScale\": \"1\",\n" +
+                "    \"TSOEnabled\": \"1\",\n" +
+                "    \"VectorTSOEnabled\": \"1\",\n" +
+                "    \"MemcpySetTSOEnabled\": \"0\",\n" +
+                "    \"HalfBarrierTSOEnabled\": \"1\",\n" +
+                "    \"VolatileMetadata\": \"1\",\n" +
+                "    \"HideHypervisorBit\": \"0\",\n" +
+                "    \"X87ReducedPrecision\": \"1\",\n" +
+                "    \"MonoHacks\": \"0\",\n" +
+                "    \"SilentLog\": \"1\",\n" +
+                "    \"OutputLog\": \"stdout\",\n" +
+                "    \"SMCChecks\": \"1\",\n" +
+                "    \"ForceSVEWidth\": \"0\",\n" +
+                "    \"ProfileStats\": \"0\",\n" +
+                "    \"O0\": \"0\"\n" +
+                "  }\n" +
+                "}";
+            
+            // Create Steam config files
+            String[] steamExes = {"steamservice.exe.json", "steamwebhelper.exe.json", "steam.exe.json"};
+            for (String exeName : steamExes) {
+                File configFile = new File(appConfigDir, exeName);
+                FileUtils.writeString(configFile, steamConfigJson);
             }
         } catch (Exception e) {
             Timber.e(e, "Failed to delete FEXCore config files");

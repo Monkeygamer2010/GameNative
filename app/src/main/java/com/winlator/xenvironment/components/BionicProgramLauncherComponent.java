@@ -50,8 +50,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 import app.gamenative.PluviaApp;
+import app.gamenative.data.GameSource;
 import app.gamenative.events.AndroidEvent;
 import app.gamenative.service.SteamService;
+import app.gamenative.utils.ContainerUtils;
 
 public class BionicProgramLauncherComponent extends GuestProgramLauncherComponent {
     private String guestExecutable;
@@ -272,7 +274,17 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         envVars.put("SSL_CERT_DIR", rootDir.getPath() + "/usr/etc/tls/certs");
         envVars.put("WINE_X11FORCEGLX", "1");
         envVars.put("WINE_GST_NO_GL", "1");
-        envVars.put("SteamGameId", "0");
+        String steamGameId = "0";
+        GameSource gameSource = ContainerUtils.INSTANCE.extractGameSourceFromContainerId(container.id);
+        if (gameSource == GameSource.STEAM) {
+            try {
+                int gameId = ContainerUtils.INSTANCE.extractGameIdFromContainerId(container.id);
+                steamGameId = String.valueOf(gameId);
+            } catch (Exception e) {
+                Log.w("BionicProgramLauncherComponent", "Failed to extract Steam game ID from container: " + container.id, e);
+            }
+        }
+        envVars.put("SteamGameId", steamGameId);
 
         String primaryDNS = "8.8.4.4";
         ConnectivityManager connectivityManager = (ConnectivityManager) context.getSystemService(Service.CONNECTIVITY_SERVICE);

@@ -1074,14 +1074,6 @@ fun preLaunchApp(
                 "experimental-drm.tzst"
             ).await()
         }
-        if (container.isLaunchRealSteam && !SteamService.isFileInstallable(context, "steam.tzst")) {
-            setLoadingMessage(context.getString(R.string.main_downloading_steam))
-            SteamService.downloadSteam(
-                onDownloadProgress = { setLoadingProgress(it / 1.0f) },
-                this,
-                context = context,
-            ).await()
-        }
         val loadingMessage = if (container.containerVariant.equals(Container.GLIBC))
             context.getString(R.string.main_installing_glibc)
         else

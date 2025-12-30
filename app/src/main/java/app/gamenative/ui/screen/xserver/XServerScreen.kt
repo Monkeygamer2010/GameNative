@@ -1448,11 +1448,11 @@ private fun setupXEnvironment(
     val wineDebugChannels = PrefManager.wineDebugChannels
     // explicitly enable or disable Wine debug channels
     envVars.put(
-        "WINEDEBUG",
-        if (enableWineDebug && wineDebugChannels.isNotEmpty())
-            "+" + wineDebugChannels.replace(",", ",+")
-        else
-            "-all",
+        "WINEDEBUG", "steam.exe:+loaddll,+file,+err,+exec,+process,+seh,+tid"
+//        if (enableWineDebug && wineDebugChannels.isNotEmpty())
+//            "+" + wineDebugChannels.replace(",", ",+")
+//        else
+//            "-all",
     )
     // capture debug output to file if either Wine or Box86/64 logging is enabled
     var logFile: File? = null
@@ -1734,9 +1734,15 @@ private fun getWineStartCommand(
         "\"wfm.exe\""
     } else {
         if (container.isLaunchRealSteam()) {
-            // Launch Steam with the applaunch parameter to start the game
-            "\"C:\\\\Program Files (x86)\\\\Steam\\\\steam.exe\" -silent -vgui -tcp " +
-                    "-nobigpicture -nofriendsui -nochatui -nointro -applaunch $steamAppId"
+            // Get language from container
+            val language = runCatching {
+                (container.getExtra("language", null)
+                    ?: container.javaClass.getMethod("getLanguage").invoke(container) as? String)
+                    ?: "english"
+            }.getOrDefault("english").lowercase()
+
+            // Launch Steam with authentication parameters
+            "\"C:\\\\Program Files (x86)\\\\Steam\\\\steam.exe\" --username ${PrefManager.username} --token ${PrefManager.refreshToken} --rememberme --language ${language} --applaunch ${steamAppId}"
         } else {
             var executablePath = ""
             if (container.executablePath.isNotEmpty()) {
@@ -2788,15 +2794,59 @@ private fun extractSteamFiles(
     onExtractFileListener: OnExtractFileListener?,
 ) {
     val imageFs = ImageFs.find(context)
-    if (File(ImageFs.find(context).rootDir.absolutePath, ImageFs.WINEPREFIX + "/drive_c/Program Files (x86)/Steam/steam.exe").exists()) return
-    val downloaded = File(imageFs.getFilesDir(), "steam.tzst")
-    Timber.i("Extracting steam.tzst")
-    TarCompressorUtils.extract(
-        TarCompressorUtils.Type.ZSTD,
-        downloaded,
-        imageFs.getRootDir(),
-        onExtractFileListener,
-    );
+    val steamDir = File(imageFs.wineprefix, "drive_c/Program Files (x86)/Steam")
+    val steamAgentDir = File(imageFs.wineprefix, "drive_c/Program Files (x86)/SteamAgent")
+    val steamExe = File(steamDir, "steam.exe")
+    val steamAgentExe = File(steamAgentDir, "SteamAgent.exe")
+    steamDir.mkdirs()
+    steamAgentDir.mkdirs()
+
+    // Extract steam_9866233.tzst to Steam directory if needed
+    if (!steamExe.exists()) {
+        Timber.i("Extracting steam_9866233.tzst")
+        TarCompressorUtils.extract(
+            TarCompressorUtils.Type.ZSTD,
+            context.assets,
+            "steam_9866233.tzst",
+            steamDir,
+            onExtractFileListener,
+        )
+    }
+
+    // Extract steamagent.tzst to SteamAgent directory if needed
+    if (!steamAgentExe.exists()) {
+        Timber.i("Extracting steamagent.tzst")
+        TarCompressorUtils.extract(
+            TarCompressorUtils.Type.ZSTD,
+            context.assets,
+            "steamagent.tzst",
+            steamAgentDir,
+            onExtractFileListener,
+        )
+    }
+
+    // Create/replace symlink from steam.exe to SteamAgent.exe
+    // FileUtils.symlink() will handle deleting existing steam.exe if it exists
+    if (steamExe.exists() && steamAgentExe.exists()) {
+        Timber.i("Creating symlink from steam.exe to SteamAgent.exe")
+        FileUtils.symlink(steamAgentExe.absolutePath, steamExe.absolutePath)
+    }
+
+    // Create launch.bat file for testing
+    val launchBat = File(steamDir, "launch.bat")
+    val language = runCatching {
+        (container.getExtra("language", null)
+            ?: container.javaClass.getMethod("getLanguage").invoke(container) as? String)
+            ?: "english"
+    }.getOrDefault("english").lowercase()
+
+    val batContent = """
+        @echo off
+        "C:\Program Files (x86)\Steam\steam.exe" --username ${PrefManager.username} --token ${PrefManager.refreshToken} --rememberme --language ${language} --applaunch %1
+    """.trimIndent()
+
+    launchBat.writeText(batContent)
+    Timber.i("Created launch.bat in Steam directory")
 }
 
 private fun readZipManifestNameFromAssets(context: Context, assetName: String): String? {
