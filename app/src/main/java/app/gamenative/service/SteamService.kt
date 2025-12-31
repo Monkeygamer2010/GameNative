@@ -1349,8 +1349,8 @@ class SteamService : Service(), IChallengeUrlChanged {
                             AppInfo(
                                 downloadingAppId,
                                 isDownloaded = true,
-                                downloadedDepots = updatedDownloadedDepots,
-                                dlcDepots = updatedDlcDepots,
+                                downloadedDepots = updatedDownloadedDepots.sorted(),
+                                dlcDepots = updatedDlcDepots.sorted(),
                             ),
                         )
                     } else {
@@ -1358,8 +1358,8 @@ class SteamService : Service(), IChallengeUrlChanged {
                             AppInfo(
                                 downloadingAppId,
                                 isDownloaded = true,
-                                downloadedDepots = entitledDepotIds,
-                                dlcDepots = selectedDlcAppIds,
+                                downloadedDepots = entitledDepotIds.sorted(),
+                                dlcDepots = selectedDlcAppIds.sorted(),
                             ),
                         )
                     }
