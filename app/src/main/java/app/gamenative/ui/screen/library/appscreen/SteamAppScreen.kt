@@ -1035,7 +1035,6 @@ class SteamAppScreen : BaseAppScreen() {
                         if (operation != null) {
                             CoroutineScope(Dispatchers.IO).launch {
                                 val container = ContainerUtils.getOrCreateContainer(context, libraryItem.appId)
-                                MarkerUtils.addMarker(getAppDirPath(gameId), Marker.MODIFYING_MARKER)
                                 val downloadInfo = SteamService.downloadApp(gameId)
                                 MarkerUtils.removeMarker(getAppDirPath(gameId), Marker.STEAM_DLL_REPLACED)
                                 MarkerUtils.removeMarker(getAppDirPath(gameId), Marker.STEAM_DLL_RESTORED)
@@ -1220,8 +1219,6 @@ class SteamAppScreen : BaseAppScreen() {
 
                     val installedApp = SteamService.getInstalledApp(gameId)
                     if (installedApp != null) {
-                        // Add modifying marker
-                        MarkerUtils.addMarker(getAppDirPath(gameId), Marker.MODIFYING_MARKER)
                         // Remove markers if the app is already installed
                         MarkerUtils.removeMarker(getAppDirPath(gameId), Marker.STEAM_DLL_REPLACED)
                         MarkerUtils.removeMarker(getAppDirPath(gameId), Marker.STEAM_DLL_RESTORED)

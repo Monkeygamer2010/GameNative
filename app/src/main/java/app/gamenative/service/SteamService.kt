@@ -1111,11 +1111,9 @@ class SteamService : Service(), IChallengeUrlChanged {
                 dlcAppIds.contains(depot.dlcAppId) && indirectDlcAppIds.contains(depot.dlcAppId) && depot.manifests.isNotEmpty()
             }
 
-            if (MarkerUtils.hasMarker(appDirPath, Marker.MODIFYING_MARKER)) {
-                val appInfo = getInstalledApp(appId)
-                if (appInfo != null) {
-                    mainAppDepots = mainAppDepots.filter { it.key !in appInfo.downloadedDepots }
-                }
+            val appInfo = getInstalledApp(appId)
+            if (appInfo != null) {
+                mainAppDepots = mainAppDepots.filter { it.key !in appInfo.downloadedDepots }
             }
 
             // Combine main app and DLC depots
@@ -1343,7 +1341,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                     val appInfo = getInstalledApp(downloadingAppId)
 
                     // Update Saved AppInfo
-                    if (MarkerUtils.hasMarker(appDirPath, Marker.MODIFYING_MARKER) && appInfo != null) {
+                    if (appInfo != null) {
                         val updatedDownloadedDepots = (appInfo.downloadedDepots + entitledDepotIds).distinct()
                         val updatedDlcDepots = (appInfo.dlcDepots + selectedDlcAppIds).distinct()
 
@@ -1378,7 +1376,6 @@ class SteamService : Service(), IChallengeUrlChanged {
 
                     MarkerUtils.removeMarker(appDirPath, Marker.STEAM_DLL_REPLACED)
                     MarkerUtils.removeMarker(appDirPath, Marker.STEAM_COLDCLIENT_USED)
-                    MarkerUtils.removeMarker(appDirPath, Marker.MODIFYING_MARKER)
 
                     // Clear persisted bytes file on successful completion
                     downloadInfo.clearPersistedBytesDownloaded(appDirPath)
