@@ -274,6 +274,8 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         envVars.put("SSL_CERT_DIR", rootDir.getPath() + "/usr/etc/tls/certs");
         envVars.put("WINE_X11FORCEGLX", "1");
         envVars.put("WINE_GST_NO_GL", "1");
+        envVars.put("STEAMAGENT_LOG_DIR", "Z:\\\\steamagent");
+        envVars.put("STEAMAGENT_PORT", "6969");
         String steamGameId = "0";
         GameSource gameSource = ContainerUtils.INSTANCE.extractGameSourceFromContainerId(container.id);
         if (gameSource == GameSource.STEAM) {

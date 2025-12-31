@@ -28,14 +28,15 @@ public abstract class WineUtils {
         // Expose /proc/self/maps as Z:\proc\self\maps
         File zDriveRoot = container.getRootDir().getParentFile().getParentFile();
         File procSelfDir = new File(zDriveRoot, "proc/self");
+        File cProcSelfDir = new File(dosdevicesPath+"/c:", "proc/self");
         if (!procSelfDir.exists()) {
             procSelfDir.mkdirs();
         }
+        cProcSelfDir.mkdirs();
         File procSelfMaps = new File(procSelfDir, "maps");
-        if (!procSelfMaps.exists()) {
-            FileUtils.symlink("/proc/self/maps", procSelfMaps.getAbsolutePath());
-            Log.d("WineUtils", "Created symlink from Z:\\proc\\self\\maps to /proc/self/maps");
-        }
+        FileUtils.symlink("/proc/self/maps", procSelfMaps.getAbsolutePath());
+        FileUtils.symlink("/proc/self/maps", dosdevicesPath+"/c:/proc/self/maps");
+        Log.d("WineUtils", "Created symlink from Z:\\proc\\self\\maps to /proc/self/maps");
 
         // Auto-fix containers missing D: and E: drives
         String currentDrives = container.getDrives();
