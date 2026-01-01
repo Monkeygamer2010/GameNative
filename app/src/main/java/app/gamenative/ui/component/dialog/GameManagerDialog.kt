@@ -146,6 +146,44 @@ fun GameManagerDialog(
         return "DLC ${depotInfo.dlcAppId}"
     }
 
+    fun getSizeInfo(dlcAppId: Int): Pair<String, String> {
+        if (dlcAppId == INVALID_APP_ID || dlcAppId == gameId) {
+            // Base game case
+            val depotsForBaseGame = downloadableDepots.filter { (_, depot) ->
+                depot.dlcAppId == INVALID_APP_ID
+            }
+
+            val installBytes = depotsForBaseGame.values.sumOf {
+                it.manifests["public"]?.size ?: 0
+            }
+            val downloadBytes = depotsForBaseGame.values.sumOf {
+                it.manifests["public"]?.download ?: 0
+            }
+
+            return Pair(
+                StorageUtils.formatBinarySize(downloadBytes),
+                StorageUtils.formatBinarySize(installBytes)
+            )
+        }
+
+        // DLC case
+        val depotsForDlc = downloadableDepots.filter { (_, depot) ->
+            depot.dlcAppId == dlcAppId
+        }
+
+        val installBytes = depotsForDlc.values.sumOf {
+            it.manifests["public"]?.size ?: 0
+        }
+        val downloadBytes = depotsForDlc.values.sumOf {
+            it.manifests["public"]?.download ?: 0
+        }
+
+        return Pair(
+            StorageUtils.formatBinarySize(downloadBytes),
+            StorageUtils.formatBinarySize(installBytes)
+        )
+    }
+
     fun getInstallSizeInfo(): InstallSizeInfo {
         val availableBytes = StorageUtils.getAvailableSpace(SteamService.defaultStoragePath)
 
@@ -330,14 +368,18 @@ fun GameManagerDialog(
 
                                 ListItem(
                                     headlineContent = {
-                                        Text(
-                                            text = getDepotAppName(depotInfo) +
-                                                    (if (BuildConfig.DEBUG) {
-                                                        "\ndepotId: " + depotInfo.depotId + ", dlcAppId: " + depotInfo.dlcAppId
-                                                    } else {
-                                                        ""
-                                                    })
-                                        )
+                                        Column {
+                                            Text(
+                                                text = getDepotAppName(depotInfo)
+                                            )
+                                            // Add size display
+                                            val (downloadSize, installSize) = getSizeInfo(dlcAppId)
+                                            Text(
+                                                text = "$downloadSize download • $installSize install",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                            )
+                                        }
                                     },
                                     trailingContent = {
                                         Checkbox(

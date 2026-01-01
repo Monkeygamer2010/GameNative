@@ -472,10 +472,6 @@ class SteamService : Service(), IChallengeUrlChanged {
                     /* Base-game depots always download */
                     depot.dlcAppId == INVALID_APP_ID -> true
 
-                    /* Optional DLC depots are skipped */
-                    /* This line is commented out because game manager will now handle those optional DLCs */
-                    //depot.optionalDlcId == depot.dlcAppId -> false
-
                     /* ① licence cache */
                     instance?.licenseDao?.findLicense(depot.dlcAppId) != null -> true
 
