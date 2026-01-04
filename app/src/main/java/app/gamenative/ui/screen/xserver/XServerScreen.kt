@@ -796,8 +796,6 @@ fun XServerScreen(
             val externalDisplayController = ExternalDisplayInputController(
                 context = context,
                 xServer = xServerView.getxServer(),
-                winHandler = xServerView.getxServer().winHandler,
-                inputControlsViewProvider = { PluviaApp.inputControlsView },
                 touchpadViewProvider = { PluviaApp.touchpadView },
             ).apply {
                 setMode(ExternalDisplayInputController.fromConfig(container.externalDisplayMode))

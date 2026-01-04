@@ -2,31 +2,28 @@ package app.gamenative.externaldisplay
 
 import android.app.Presentation
 import android.content.Context
+import android.graphics.drawable.GradientDrawable
 import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
 import android.view.Display
-import android.view.KeyCharacterMap
-import android.view.KeyEvent
-import android.view.MotionEvent
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.view.inputmethod.BaseInputConnection
-import android.view.inputmethod.EditorInfo
-import android.view.inputmethod.InputConnection
-import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
-import com.winlator.widget.InputControlsView
+import android.widget.ImageButton
+import android.widget.ImageView
+import app.gamenative.R
 import com.winlator.widget.TouchpadView
-import com.winlator.winhandler.WinHandler
 import com.winlator.xserver.XServer
+
+private const val EXTERNAL_TOUCHPAD_BG: Int = 0xFF2B2B2B.toInt()
+private const val EXTERNAL_KEYBOARD_BG: Int = 0xFF2B2B2B.toInt()
 
 class ExternalDisplayInputController(
     private val context: Context,
     private val xServer: XServer,
-    private val winHandler: WinHandler,
-    private val inputControlsViewProvider: () -> InputControlsView?,
     private val touchpadViewProvider: () -> TouchpadView?,
 ) {
     enum class Mode { OFF, TOUCHPAD, KEYBOARD, HYBRID }
@@ -100,8 +97,6 @@ class ExternalDisplayInputController(
                 display = targetDisplay,
                 mode = mode,
                 xServer = xServer,
-                winHandler = winHandler,
-                inputControlsViewProvider = inputControlsViewProvider,
                 touchpadViewProvider = touchpadViewProvider,
             )
             presentation?.show()
@@ -130,8 +125,6 @@ private class ExternalInputPresentation(
     display: Display,
     private var mode: ExternalDisplayInputController.Mode,
     private val xServer: XServer,
-    private val winHandler: WinHandler,
-    private val inputControlsViewProvider: () -> InputControlsView?,
     private val touchpadViewProvider: () -> TouchpadView?,
 ) : Presentation(context, display) {
 
@@ -159,7 +152,7 @@ private class ExternalInputPresentation(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT,
                     )
-                    setBackgroundColor(0xFF121212.toInt())
+                    setBackgroundColor(EXTERNAL_TOUCHPAD_BG)
                     touchpadViewProvider()?.let { primary ->
                         setSimTouchScreen(primary.isSimTouchScreen)
                     }
@@ -167,25 +160,42 @@ private class ExternalInputPresentation(
                 setContentView(pad)
             }
             ExternalDisplayInputController.Mode.KEYBOARD -> {
-                val keyboardView = ExternalKeyboardView(
-                    context = context,
-                    xServer = xServer,
-                    winHandler = winHandler,
-                    inputControlsViewProvider = inputControlsViewProvider,
-                ).apply {
+                val root = FrameLayout(context).apply {
                     layoutParams = FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT,
                     )
+                    setBackgroundColor(EXTERNAL_KEYBOARD_BG)
                 }
-                setContentView(keyboardView)
+
+                val hintIcon = ImageView(context).apply {
+                    val density = resources.displayMetrics.density
+                    val sizePx = (128 * density).toInt()
+                    layoutParams = FrameLayout.LayoutParams(sizePx, sizePx).apply {
+                        gravity = Gravity.CENTER
+                    }
+                    setImageResource(R.drawable.icon_keyboard)
+                    alpha = 0.35f
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                }
+
+                val keyboardView = ExternalOnScreenKeyboardView(context, xServer).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ).apply {
+                        gravity = Gravity.BOTTOM
+                    }
+                }
+
+                root.addView(hintIcon)
+                root.addView(keyboardView)
+                setContentView(root)
             }
             ExternalDisplayInputController.Mode.HYBRID -> {
                 val hybrid = HybridInputLayout(
                     context = context,
                     xServer = xServer,
-                    winHandler = winHandler,
-                    inputControlsViewProvider = inputControlsViewProvider,
                     touchpadViewProvider = touchpadViewProvider,
                 )
                 setContentView(hybrid)
@@ -200,204 +210,67 @@ private class ExternalInputPresentation(
 private class HybridInputLayout(
     context: Context,
     xServer: XServer,
-    winHandler: WinHandler,
-    inputControlsViewProvider: () -> InputControlsView?,
     touchpadViewProvider: () -> TouchpadView?,
 ) : FrameLayout(context) {
 
-    private val headerHeightPx = (64 * resources.displayMetrics.density).toInt()
     private val touchpad = TouchpadView(context, xServer, false).apply {
         layoutParams = LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT,
         )
-        setBackgroundColor(0xFF121212.toInt())
+        setBackgroundColor(EXTERNAL_TOUCHPAD_BG)
         touchpadViewProvider()?.let { primary ->
             setSimTouchScreen(primary.isSimTouchScreen)
         }
     }
-    private val keyboard = ExternalKeyboardView(
-        context = context,
-        xServer = xServer,
-        winHandler = winHandler,
-        inputControlsViewProvider = inputControlsViewProvider,
-        autoShowImeOnTouch = false,
-    ).apply {
+    private val keyboardView = ExternalOnScreenKeyboardView(context, xServer).apply {
         layoutParams = LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT,
-        )
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply {
+            gravity = Gravity.BOTTOM
+        }
         visibility = View.GONE
     }
 
-    private val header = View(context).apply {
-        layoutParams = LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            headerHeightPx,
-        )
-        setBackgroundColor(0xFF1E1E1E.toInt())
+    private val keyboardToggleButton = ImageButton(context).apply {
+        val density = resources.displayMetrics.density
+        val sizePx = (56 * density).toInt()
+        val marginPx = (16 * density).toInt()
+        layoutParams = LayoutParams(sizePx, sizePx).apply {
+            gravity = Gravity.BOTTOM or Gravity.END
+            setMargins(marginPx, marginPx, marginPx, marginPx)
+        }
+        background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(0xFF3A3A3A.toInt())
+        }
+        setImageResource(R.drawable.icon_keyboard)
+        scaleType = ImageView.ScaleType.CENTER_INSIDE
+        setPadding(marginPx / 2, marginPx / 2, marginPx / 2, marginPx / 2)
         setOnClickListener { toggleKeyboard() }
     }
 
     init {
         addView(touchpad)
-        addView(keyboard)
-        addView(header)
+        addView(keyboardView)
+        addView(keyboardToggleButton)
+
+        keyboardView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            updateToggleButtonPosition()
+        }
     }
 
     private fun toggleKeyboard() {
-        if (keyboard.visibility == View.VISIBLE) {
-            keyboard.visibility = View.GONE
-            touchpad.visibility = View.VISIBLE
-            keyboard.hideIme()
+        val shouldShow = keyboardView.visibility != View.VISIBLE
+        keyboardView.visibility = if (shouldShow) View.VISIBLE else View.GONE
+        post { updateToggleButtonPosition() }
+    }
+    private fun updateToggleButtonPosition() {
+        keyboardToggleButton.translationY = if (keyboardView.visibility == View.VISIBLE) {
+            -keyboardView.height.toFloat()
         } else {
-            keyboard.visibility = View.VISIBLE
-            touchpad.visibility = View.GONE
-            keyboard.requestFocus()
-            keyboard.showIme()
-        }
-    }
-}
-
-private class ExternalKeyboardView(
-    context: Context,
-    private val xServer: XServer,
-    private val winHandler: WinHandler,
-    private val inputControlsViewProvider: () -> InputControlsView?,
-    private val autoShowImeOnTouch: Boolean = true,
-) : FrameLayout(context) {
-
-    private val inputMethodManager = context.getSystemService(InputMethodManager::class.java)
-    private val keyCharacterMap = KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD)
-
-    init {
-        isFocusable = true
-        isFocusableInTouchMode = true
-        setBackgroundColor(0xFF0F0F0F.toInt())
-        post { if (autoShowImeOnTouch) showIme() }
-    }
-
-    override fun onAttachedToWindow() {
-        super.onAttachedToWindow()
-        if (autoShowImeOnTouch) showIme()
-    }
-
-    override fun onCheckIsTextEditor(): Boolean = true
-
-    override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
-        outAttrs.inputType = EditorInfo.TYPE_CLASS_TEXT
-        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_FLAG_NO_FULLSCREEN
-        return KeyboardInputConnection(this, true)
-    }
-
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        val handledByControls = inputControlsViewProvider()?.onKeyEvent(event) == true
-        if (handledByControls) return true
-        return xServer.keyboard.onKeyEvent(event)
-    }
-
-    override fun onGenericMotionEvent(event: MotionEvent?): Boolean {
-        event ?: return false
-        val handledByControls = inputControlsViewProvider()?.onGenericMotionEvent(event) == true
-        if (handledByControls) return true
-        return winHandler.onGenericMotionEvent(event)
-    }
-
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (autoShowImeOnTouch) showIme()
-        return super.onTouchEvent(event)
-    }
-
-    fun showIme() {
-        requestFocus()
-        inputMethodManager?.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
-    }
-
-    fun hideIme() {
-        inputMethodManager?.hideSoftInputFromWindow(windowToken, 0)
-    }
-
-    private inner class KeyboardInputConnection(
-        targetView: View,
-        fullEditor: Boolean,
-    ) : BaseInputConnection(targetView, fullEditor) {
-        private var composingText: String = ""
-
-        override fun sendKeyEvent(event: KeyEvent): Boolean {
-            return dispatchKeyEvent(event)
-        }
-
-        override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
-            if (text.isNullOrEmpty()) return true
-            if (text == "\n") {
-                composingText = ""
-                return true // Do not inject newline via commit; let raw enter key events handle it
-            }
-            val newText = text.toString()
-            if (newText != composingText) {
-                sendChars(newText)
-            }
-            composingText = ""
-            return true
-        }
-
-        override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
-            composingText = ""
-            repeat(beforeLength) {
-                dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL))
-                dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
-            }
-            return true
-        }
-
-        override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
-            if (text.isNullOrEmpty()) {
-                composingText = ""
-                return true
-            }
-            val newText = text.toString()
-            when {
-                newText.isEmpty() -> composingText = ""
-                newText.length <= composingText.length && newText.startsWith(composingText.take(newText.length)) -> {
-                    // IME is trimming composition (likely from backspace); do not resend characters
-                    composingText = newText
-                }
-                newText.startsWith(composingText) -> {
-                    val delta = newText.substring(composingText.length)
-                    if (delta.isNotEmpty()) sendChars(delta)
-                    composingText = newText
-                }
-                else -> {
-                    sendChars(newText)
-                    composingText = newText
-                }
-            }
-            return true
-        }
-
-        override fun finishComposingText(): Boolean {
-            composingText = ""
-            return true
-        }
-
-        private fun sendChars(text: CharSequence) {
-            val events = keyCharacterMap.getEvents(text.toString().toCharArray())
-            if (events != null) {
-                events.forEach { dispatchKeyEvent(it) }
-            } else {
-                text.forEach { ch ->
-                    val down = KeyEvent(
-                        0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_UNKNOWN, 0, 0, 0, 0,
-                        KeyEvent.FLAG_SOFT_KEYBOARD or KeyEvent.FLAG_KEEP_TOUCH_MODE, ch.code,
-                    )
-                    val up = KeyEvent(
-                        0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_UNKNOWN, 0, 0, 0, 0,
-                        KeyEvent.FLAG_SOFT_KEYBOARD or KeyEvent.FLAG_KEEP_TOUCH_MODE, ch.code,
-                    )
-                    dispatchKeyEvent(down)
-                    dispatchKeyEvent(up)
-                }
-            }
+            0f
         }
     }
 }
