@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -15,7 +16,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.res.stringResource
 import app.gamenative.CrashHandler
 import coil.annotation.ExperimentalCoilApi
@@ -41,9 +44,11 @@ import app.gamenative.ui.component.dialog.WineDebugChannelsDialog
 @Composable
 fun SettingsGroupDebug() {
     val context = LocalContext.current
-    // initialize preference managers
-    PrefManager.init(context)
-    WinlatorPrefManager.init(context)
+    val isPreview = LocalInspectionMode.current
+    if (!isPreview) {
+        PrefManager.init(context)
+        WinlatorPrefManager.init(context)
+    }
 
     // Load Wine debug channels and prepare selection state
     var allWineChannels by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -155,7 +160,10 @@ fun SettingsGroupDebug() {
         )
     }
 
-    SettingsGroup(title = { Text(text = stringResource(R.string.settings_debug_title)) }) {
+    SettingsGroup(
+        modifier = Modifier.background(Color.Transparent),
+        title = { Text(text = stringResource(R.string.settings_debug_title)) }
+    ) {
         SettingsMenuLink(
             colors = settingsTileColors(),
             title = { Text(text = stringResource(R.string.settings_save_logcat_title)) },
@@ -166,7 +174,14 @@ fun SettingsGroupDebug() {
         SettingsMenuLink(
             colors = settingsTileColors(),
             title = { Text(text = stringResource(R.string.settings_debug_wine_channels_title)) },
-            subtitle = { Text(text = if (selectedWineChannels.isNotEmpty()) selectedWineChannels.joinToString(",") else "No channels selected") },
+            subtitle = {
+                Text(
+                    text = if (selectedWineChannels.isNotEmpty() && selectedWineChannels.any { it.isNotBlank() })
+                        selectedWineChannels.filter { it.isNotBlank() }.joinToString(",")
+                    else
+                        stringResource(R.string.settings_debug_no_channels_selected)
+                )
+            },
             onClick = { showChannelsDialog = true },
         )
         SettingsSwitch(
@@ -193,12 +208,12 @@ fun SettingsGroupDebug() {
             colors = settingsTileColors(),
             title = { Text(text = stringResource(R.string.settings_debug_view_crash_title)) },
             subtitle = {
-                val text = if (latestCrashFile != null) {
-                    "Shows the most recent crash log"
-                } else {
-                    "No recent crash logs found"
-                }
-                Text(text = text)
+                Text(
+                    text = if (latestCrashFile != null)
+                        stringResource(R.string.settings_debug_view_crash_subtitle)
+                    else
+                        stringResource(R.string.settings_debug_no_crash_logs)
+                )
             },
             enabled = latestCrashFile != null,
             onClick = { showLogcatDialog = true },
@@ -208,12 +223,12 @@ fun SettingsGroupDebug() {
             colors = settingsTileColors(),
             title = { Text(text = stringResource(R.string.settings_debug_view_log_title)) },
             subtitle = {
-                val text = if (latestWineLogFile != null) {
-                    "Shows the latest Wine/Box64 debug log"
-                } else {
-                    "No Wine debug logs found"
-                }
-                Text(text = text)
+                Text(
+                    text = if (latestWineLogFile != null)
+                        stringResource(R.string.settings_debug_view_log_subtitle)
+                    else
+                        stringResource(R.string.settings_debug_no_wine_logs)
+                )
             },
             enabled = latestWineLogFile != null,
             onClick = { showWineLogDialog = true },

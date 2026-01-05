@@ -9,7 +9,6 @@ data class UserLoginState(
     val rememberSession: Boolean = false,
     val twoFactorCode: String = "",
 
-    val isSteamConnected: Boolean = false,
     val isLoggingIn: Boolean = false,
 
     val loginResult: LoginResult = LoginResult.Failed,
@@ -22,22 +21,4 @@ data class UserLoginState(
     val qrCode: String? = null,
     val isQrFailed: Boolean = false,
     val lastTwoFactorMethod: String? = null,
-) {
-    override fun toString(): String {
-        return "UserLoginState(" +
-            "username='$username', " +
-            "password='$password', " +
-            "rememberSession=$rememberSession, " +
-            "twoFactorCode='$twoFactorCode', " +
-            "isSteamConnected=$isSteamConnected, " +
-            "isLoggingIn=$isLoggingIn, " +
-            "loginResult=$loginResult, " +
-            "loginScreen=$loginScreen, " +
-            "previousCodeIncorrect=$previousCodeIncorrect, " +
-            "email=$email, " +
-            "qrCode=$qrCode, " +
-            "isQrFailed=$isQrFailed, " +
-            "lastTwoFactorMethod=$lastTwoFactorMethod" +
-            ")"
-    }
-}
+)

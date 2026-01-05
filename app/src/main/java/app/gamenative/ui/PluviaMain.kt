@@ -3,8 +3,6 @@ package app.gamenative.ui
 import android.content.Context
 import android.content.Intent
 import android.widget.Toast
-import androidx.activity.OnBackPressedDispatcher
-import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
@@ -17,7 +15,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.BlendMode.Companion.Screen
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.zIndex
@@ -43,7 +40,6 @@ import app.gamenative.PluviaApp
 import app.gamenative.PrefManager
 import app.gamenative.R
 import app.gamenative.data.GameSource
-import app.gamenative.data.PostSyncInfo
 import app.gamenative.enums.AppTheme
 import app.gamenative.enums.LoginResult
 import app.gamenative.enums.PathType
@@ -51,13 +47,14 @@ import app.gamenative.enums.SaveLocation
 import app.gamenative.enums.SyncResult
 import app.gamenative.events.AndroidEvent
 import app.gamenative.service.SteamService
-import app.gamenative.ui.component.ConnectingServersScreen
+import app.gamenative.ui.component.ConnectionStatusBanner
 import app.gamenative.ui.component.dialog.GameFeedbackDialog
 import app.gamenative.ui.component.dialog.LoadingDialog
 import app.gamenative.ui.component.dialog.MessageDialog
 import app.gamenative.ui.component.dialog.state.GameFeedbackDialogState
 import app.gamenative.ui.component.dialog.state.MessageDialogState
 import app.gamenative.ui.components.BootingSplash
+import app.gamenative.ui.enums.ConnectionState
 import app.gamenative.ui.enums.DialogType
 import app.gamenative.ui.enums.Orientation
 import app.gamenative.ui.model.MainViewModel
@@ -68,7 +65,6 @@ import app.gamenative.ui.screen.login.UserLoginScreen
 import app.gamenative.ui.screen.settings.SettingsScreen
 import app.gamenative.ui.screen.xserver.XServerScreen
 import app.gamenative.ui.theme.PluviaTheme
-import app.gamenative.utils.ContainerMigrator
 import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.CustomGameScanner
 import app.gamenative.utils.GameFeedbackUtils
@@ -81,14 +77,103 @@ import com.winlator.container.Container
 import com.winlator.container.ContainerManager
 import com.winlator.xenvironment.ImageFsInstaller
 import `in`.dragonbra.javasteam.protobufs.steamclient.SteammessagesClientObjects.ECloudPendingRemoteOperation
+import java.util.Date
+import java.util.EnumSet
+import kotlin.reflect.KFunction2
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import timber.log.Timber
-import java.util.Date
-import java.util.EnumSet
-import kotlin.reflect.KFunction2
+
+/**
+ * Navigates from the LoginUser screen to the target route, popping the login screen from the stack.
+ * Only navigates if currently on the LoginUser screen.
+ *
+ * @param targetRoute The route to navigate to
+ * @param logTag Optional tag for logging the navigation
+ */
+private fun NavHostController.navigateFromLoginIfNeeded(
+    targetRoute: String,
+    logTag: String = "PluviaMain",
+) {
+    val currentRoute = currentDestination?.route
+    if (currentRoute == PluviaScreen.LoginUser.route) {
+        Timber.tag(logTag).i("Navigating from LoginUser to $targetRoute")
+        navigate(targetRoute) {
+            popUpTo(PluviaScreen.LoginUser.route) {
+                inclusive = true
+            }
+        }
+    }
+}
+
+/**
+ * Result of resolving a game app ID to determine the correct format and installation status.
+ */
+private sealed class GameResolutionResult {
+    /**
+     * Game was resolved successfully.
+     * @param finalAppId The resolved app ID (may be different from original if it's a custom game)
+     * @param gameId The extracted numeric game ID
+     * @param isSteamInstalled Whether this is an installed Steam game
+     * @param isCustomGame Whether this is a custom game
+     */
+    data class Success(
+        val finalAppId: String,
+        val gameId: Int,
+        val isSteamInstalled: Boolean,
+        val isCustomGame: Boolean,
+    ) : GameResolutionResult()
+
+    /**
+     * Game was not found - neither installed as Steam game nor as custom game.
+     * @param gameId The extracted numeric game ID
+     * @param originalAppId The original app ID that was passed in
+     */
+    data class NotFound(
+        val gameId: Int,
+        val originalAppId: String,
+    ) : GameResolutionResult()
+}
+
+/**
+ * Resolves an app ID to determine the correct game source and format.
+ * Checks both Steam installation status and custom game registry.
+ *
+ * @param appId The app ID to resolve (format: "STEAM_<id>" or "CUSTOM_GAME_<id>")
+ * @return GameResolutionResult indicating success with resolved ID or not found
+ */
+private fun resolveGameAppId(appId: String): GameResolutionResult {
+    val gameId = ContainerUtils.extractGameIdFromContainerId(appId)
+    val isSteamInstalled = SteamService.isAppInstalled(gameId)
+
+    val customGamePath = if (!isSteamInstalled) {
+        CustomGameScanner.findCustomGameById(gameId)
+    } else {
+        null
+    }
+
+    // If neither Steam installed nor custom game found
+    if (!isSteamInstalled && customGamePath == null) {
+        return GameResolutionResult.NotFound(gameId, appId)
+    }
+
+    // Determine the final appId to use
+    val isCustomGame = customGamePath != null && !isSteamInstalled
+    val finalAppId = if (isCustomGame) {
+        "${GameSource.CUSTOM_GAME.name}_$gameId"
+    } else {
+        appId
+    }
+
+    return GameResolutionResult.Success(
+        finalAppId = finalAppId,
+        gameId = gameId,
+        isSteamInstalled = isSteamInstalled,
+        isCustomGame = isCustomGame,
+    )
+}
 
 @Composable
 fun PluviaMain(
@@ -143,43 +228,39 @@ fun PluviaMain(
                 is MainViewModel.MainUiEvent.ExternalGameLaunch -> {
                     Timber.i("[PluviaMain]: Received ExternalGameLaunch UI event for app ${event.appId}")
 
-                    // Extract game ID from appId (format: "STEAM_<id>" or "CUSTOM_GAME_<id>")
-                    val gameId = ContainerUtils.extractGameIdFromContainerId(event.appId)
+                    when (val resolution = resolveGameAppId(event.appId)) {
+                        is GameResolutionResult.Success -> {
+                            Timber.i("[PluviaMain]: Using appId: ${resolution.finalAppId} (original: ${event.appId}, isSteamInstalled: ${resolution.isSteamInstalled}, isCustomGame: ${resolution.isCustomGame})")
 
-                    // First check if it's a Steam game and if it's installed
-                    val isSteamInstalled = SteamService.isAppInstalled(gameId)
+                            viewModel.setLaunchedAppId(resolution.finalAppId)
+                            viewModel.setBootToContainer(false)
+                            preLaunchApp(
+                                context = context,
+                                appId = resolution.finalAppId,
+                                setLoadingDialogVisible = viewModel::setLoadingDialogVisible,
+                                setLoadingProgress = viewModel::setLoadingDialogProgress,
+                                setLoadingMessage = viewModel::setLoadingDialogMessage,
+                                setMessageDialogState = setMessageDialogState,
+                                onSuccess = viewModel::launchApp,
+                            )
+                        }
 
-                    // If not installed as Steam game, check if it's a custom game
-                    val customGamePath = if (!isSteamInstalled) {
-                        CustomGameScanner.findCustomGameById(gameId)
-                    } else {
-                        null
+                        is GameResolutionResult.NotFound -> {
+                            val appName = SteamService.getAppInfoOf(resolution.gameId)?.name ?: "App ${event.appId}"
+                            Timber.w("[PluviaMain]: Game not installed: $appName (${event.appId})")
+                            msgDialogState = MessageDialogState(
+                                visible = true,
+                                type = DialogType.SYNC_FAIL,
+                                title = context.getString(R.string.game_not_installed_title),
+                                message = context.getString(R.string.game_not_installed_message, appName),
+                                dismissBtnText = context.getString(R.string.ok),
+                            )
+                        }
                     }
-
-                    // Determine the final appId to use
-                    val finalAppId = if (customGamePath != null && !isSteamInstalled) {
-                        "${GameSource.CUSTOM_GAME.name}_$gameId"
-                    } else {
-                        event.appId
-                    }
-
-                    Timber.i("[PluviaMain]: Using appId: $finalAppId (original: ${event.appId}, isSteamInstalled: $isSteamInstalled, customGamePath: ${customGamePath != null})")
-
-                    viewModel.setLaunchedAppId(finalAppId)
-                    viewModel.setBootToContainer(false)
-                    preLaunchApp(
-                        context = context,
-                        appId = finalAppId,
-                        setLoadingDialogVisible = viewModel::setLoadingDialogVisible,
-                        setLoadingProgress = viewModel::setLoadingDialogProgress,
-                        setLoadingMessage = viewModel::setLoadingDialogMessage,
-                        setMessageDialogState = setMessageDialogState,
-                        onSuccess = viewModel::launchApp,
-                    )
                 }
 
                 MainViewModel.MainUiEvent.OnBackPressed -> {
-                    if (SteamService.isGameRunning){
+                    if (SteamService.isGameRunning) {
                         gameBackAction?.invoke() ?: run { navController.popBackStack() }
                     } else if (hasBack) {
                         // TODO: check if back leads to log out and present confidence modal
@@ -190,7 +271,9 @@ fun PluviaMain(
                 }
 
                 MainViewModel.MainUiEvent.OnLoggedOut -> {
-                    // Pop stack and go back to login.
+                    // Clear persisted route so next login starts fresh from Home
+                    viewModel.clearPersistedRoute()
+                    // Pop stack and go back to login
                     navController.popBackStack(
                         route = PluviaScreen.LoginUser.route,
                         inclusive = false,
@@ -203,86 +286,70 @@ fun PluviaMain(
                         LoginResult.Success -> {
                             if (MainActivity.hasPendingLaunchRequest()) {
                                 MainActivity.consumePendingLaunchRequest()?.let { launchRequest ->
-                                    Timber.tag("IntentLaunch").i("Processing pending launch request for app ${launchRequest.appId} (user is now logged in)")
+                                    Timber.tag("IntentLaunch")
+                                        .i("Processing pending launch request for app ${launchRequest.appId} (user is now logged in)")
 
-                                    // Extract game ID from appId (format: "STEAM_<id>" or "CUSTOM_GAME_<id>")
-                                    val gameId = ContainerUtils.extractGameIdFromContainerId(launchRequest.appId)
+                                    when (val resolution = resolveGameAppId(launchRequest.appId)) {
+                                        is GameResolutionResult.NotFound -> {
+                                            val appName = SteamService.getAppInfoOf(resolution.gameId)?.name ?: "App ${launchRequest.appId}"
+                                            Timber.tag("IntentLaunch").w("Game not installed: $appName (${launchRequest.appId})")
+                                            msgDialogState = MessageDialogState(
+                                                visible = true,
+                                                type = DialogType.SYNC_FAIL,
+                                                title = context.getString(R.string.game_not_installed_title),
+                                                message = context.getString(R.string.game_not_installed_message, appName),
+                                                dismissBtnText = context.getString(R.string.ok),
+                                            )
+                                            return@let
+                                        }
 
-                                    // First check if it's a Steam game and if it's installed
-                                    val isSteamInstalled = SteamService.isAppInstalled(gameId)
-
-                                    // If not installed as Steam game, check if it's a custom game
-                                    val customGamePath = if (!isSteamInstalled) {
-                                        CustomGameScanner.findCustomGameById(gameId)
-                                    } else {
-                                        null
-                                    }
-
-                                    // If neither Steam installed nor custom game found, show error
-                                    if (!isSteamInstalled && customGamePath == null) {
-                                        val appName = SteamService.getAppInfoOf(gameId)?.name ?: "App ${launchRequest.appId}"
-                                        Timber.tag("IntentLaunch").w("Game not installed: $appName (${launchRequest.appId})")
-
-                                        // Show error message
-                                        msgDialogState = MessageDialogState(
-                                            visible = true,
-                                            type = DialogType.SYNC_FAIL,
-                                            title = context.getString(R.string.game_not_installed_title),
-                                            message = context.getString(R.string.game_not_installed_message, appName),
-                                            dismissBtnText = context.getString(R.string.ok),
-                                        )
-                                        return@let
-                                    }
-
-                                    // If it's a custom game, update the appId to use CUSTOM_GAME format
-                                    val finalAppId = if (customGamePath != null && !isSteamInstalled) {
-                                        "${GameSource.CUSTOM_GAME.name}_$gameId"
-                                    } else {
-                                        launchRequest.appId
-                                    }
-
-                                    // Update launchRequest with the correct appId if it was changed
-                                    val updatedLaunchRequest = if (finalAppId != launchRequest.appId) {
-                                        launchRequest.copy(appId = finalAppId)
-                                    } else {
-                                        launchRequest
-                                    }
-
-                                    if (updatedLaunchRequest.containerConfig != null) {
-                                        IntentLaunchManager.applyTemporaryConfigOverride(
-                                            context,
-                                            updatedLaunchRequest.appId,
-                                            updatedLaunchRequest.containerConfig,
-                                        )
-                                        Timber.tag("IntentLaunch").i("Applied container config override for app ${updatedLaunchRequest.appId}")
-                                    }
-
-                                    if (navController.currentDestination?.route != PluviaScreen.Home.route) {
-                                        navController.navigate(PluviaScreen.Home.route) {
-                                            popUpTo(navController.graph.startDestinationId) {
-                                                saveState = false
+                                        is GameResolutionResult.Success -> {
+                                            // Update launchRequest with the resolved appId if it changed
+                                            val updatedLaunchRequest = if (resolution.finalAppId != launchRequest.appId) {
+                                                launchRequest.copy(appId = resolution.finalAppId)
+                                            } else {
+                                                launchRequest
                                             }
+
+                                            if (updatedLaunchRequest.containerConfig != null) {
+                                                IntentLaunchManager.applyTemporaryConfigOverride(
+                                                    context,
+                                                    updatedLaunchRequest.appId,
+                                                    updatedLaunchRequest.containerConfig,
+                                                )
+                                                Timber.tag("IntentLaunch")
+                                                    .i("Applied container config override for app ${updatedLaunchRequest.appId}")
+                                            }
+
+                                            // Navigate to Home if not already there (for pending launch requests)
+                                            if (navController.currentDestination?.route != PluviaScreen.Home.route) {
+                                                navController.navigate(PluviaScreen.Home.route) {
+                                                    popUpTo(navController.graph.startDestinationId) {
+                                                        saveState = false
+                                                    }
+                                                }
+                                            }
+
+                                            viewModel.setLaunchedAppId(updatedLaunchRequest.appId)
+                                            viewModel.setBootToContainer(false)
+                                            preLaunchApp(
+                                                context = context,
+                                                appId = updatedLaunchRequest.appId,
+                                                setLoadingDialogVisible = viewModel::setLoadingDialogVisible,
+                                                setLoadingProgress = viewModel::setLoadingDialogProgress,
+                                                setLoadingMessage = viewModel::setLoadingDialogMessage,
+                                                setMessageDialogState = setMessageDialogState,
+                                                onSuccess = viewModel::launchApp,
+                                            )
                                         }
                                     }
-
-                                    viewModel.setLaunchedAppId(updatedLaunchRequest.appId)
-                                    viewModel.setBootToContainer(false)
-                                    preLaunchApp(
-                                        context = context,
-                                        appId = updatedLaunchRequest.appId,
-                                        setLoadingDialogVisible = viewModel::setLoadingDialogVisible,
-                                        setLoadingProgress = viewModel::setLoadingDialogProgress,
-                                        setLoadingMessage = viewModel::setLoadingDialogMessage,
-                                        setMessageDialogState = setMessageDialogState,
-                                        onSuccess = viewModel::launchApp,
-                                    )
                                 }
-                            }
-                            else if (PluviaApp.xEnvironment == null) {
-                                Timber.i("Navigating to library")
-                                navController.navigate(PluviaScreen.Home.route)
+                            } else if (PluviaApp.xEnvironment == null) {
+                                // Only navigate if currently on LoginUser screen
+                                val targetRoute = viewModel.getPersistedRoute() ?: PluviaScreen.Home.route
+                                navController.navigateFromLoginIfNeeded(targetRoute, "LogonEnded")
 
-                                // Check for update first
+                                // Show dialogs regardless of navigation
                                 val currentUpdateInfo = updateInfo
                                 if (currentUpdateInfo != null) {
                                     viewModel.setAnnoyingDialogShown(true)
@@ -293,7 +360,7 @@ fun PluviaMain(
                                         message = context.getString(
                                             R.string.main_update_available_message,
                                             currentUpdateInfo.versionName,
-                                            currentUpdateInfo.releaseNotes?.let { "\n\n$it" } ?: ""
+                                            currentUpdateInfo.releaseNotes?.let { "\n\n$it" } ?: "",
                                         ),
                                         confirmBtnText = context.getString(R.string.main_update_button),
                                         dismissBtnText = context.getString(R.string.main_later_button),
@@ -366,10 +433,14 @@ fun PluviaMain(
             }
             PluviaApp.events.emit(AndroidEvent.StartOrientator)
         } else {
-            navController.removeOnDestinationChangedListener(PluviaApp.onDestinationChangedListener!!)
+            PluviaApp.onDestinationChangedListener?.let {
+                navController.removeOnDestinationChangedListener(it)
+            }
         }
 
-        navController.addOnDestinationChangedListener(PluviaApp.onDestinationChangedListener!!)
+        PluviaApp.onDestinationChangedListener?.let {
+            navController.addOnDestinationChangedListener(it)
+        }
     }
 
     // TODO merge to VM?
@@ -396,18 +467,28 @@ fun PluviaMain(
 
     LaunchedEffect(Unit) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            if (!state.isSteamConnected && !isConnecting && !SteamService.isGameRunning) {
-                Timber.d("[PluviaMain]: Steam not connected - attempt")
+            // Only attempt reconnection if not already connected/connecting and not in offline mode
+            val shouldAttemptReconnect = !state.isSteamConnected &&
+                !isConnecting &&
+                !SteamService.isGameRunning &&
+                state.connectionState != ConnectionState.OFFLINE_MODE
+
+            if (shouldAttemptReconnect) {
+                Timber.d("[PluviaMain]: Steam not connected - attempting reconnection")
                 isConnecting = true
+                viewModel.startConnecting() // Update ViewModel state for UI
                 context.startForegroundService(Intent(context, SteamService::class.java))
             }
-            if (SteamService.isLoggedIn && !SteamService.isGameRunning && state.currentScreen == PluviaScreen.LoginUser) {
-                navController.navigate(PluviaScreen.Home.route)
+            // Handle navigation when already logged in (e.g., app resumed with active session)
+            // Only navigate if currently on LoginUser screen to avoid disrupting user's current view
+            if (SteamService.isLoggedIn && !SteamService.isGameRunning) {
+                val targetRoute = viewModel.getPersistedRoute() ?: PluviaScreen.Home.route
+                navController.navigateFromLoginIfNeeded(targetRoute, "ResumeSession")
             }
         }
     }
 
-    // Listen for connection state changes
+    // Listen for connection state changes - reset local isConnecting flag
     LaunchedEffect(state.isSteamConnected) {
         if (state.isSteamConnected) {
             isConnecting = false
@@ -448,42 +529,6 @@ fun PluviaMain(
         }
     }
 
-    // Timeout if stuck in connecting state for 10 seconds so that its not in loading state forever
-    LaunchedEffect(isConnecting) {
-        if (isConnecting) {
-            Timber.d("Started connecting, will timeout in 10s")
-            delay(10000)
-            Timber.d("Timeout reached, isSteamConnected=${state.isSteamConnected}")
-            if (!state.isSteamConnected) {
-                isConnecting = false
-            }
-        }
-    }
-
-    // Show loading or error UI as appropriate
-    when {
-        isConnecting -> {
-            PluviaTheme(
-                isDark = when (state.appTheme) {
-                    AppTheme.AUTO -> isSystemInDarkTheme()
-                    AppTheme.DAY -> false
-                    AppTheme.NIGHT -> true
-                    AppTheme.AMOLED -> true
-                },
-                isAmoled = state.appTheme == AppTheme.AMOLED,
-                style = state.paletteStyle,
-            ) {
-                ConnectingServersScreen(
-                    onContinueOffline = {
-                        isConnecting = false
-                        navController.navigate(PluviaScreen.Home.route + "?offline=true")
-                    },
-                )
-            }
-            return
-        }
-    }
-
     val onDismissRequest: (() -> Unit)?
     val onDismissClick: (() -> Unit)?
     val onConfirmClick: (() -> Unit)?
@@ -501,6 +546,7 @@ fun PluviaMain(
                 setMessageDialogState(MessageDialogState(false))
             }
         }
+
         DialogType.SUPPORT -> {
             onConfirmClick = {
                 uriHandler.openUri(Constants.Misc.KO_FI_LINK)
@@ -516,10 +562,10 @@ fun PluviaMain(
             onActionClick = {
                 val shareIntent = Intent().apply {
                     action = Intent.ACTION_SEND
-                    putExtra(Intent.EXTRA_TEXT, "Check out GameNative - play your PC Steam games on Android, with full support for cloud saves!\nhttps://gamenative.app\nJoin the community: https://discord.gg/2hKv4VfZfE")
+                    putExtra(Intent.EXTRA_TEXT, context.getString(R.string.main_share_text))
                     type = "text/plain"
                 }
-                context.startActivity(Intent.createChooser(shareIntent, "Share GameNative"))
+                context.startActivity(Intent.createChooser(shareIntent, context.getString(R.string.main_share)))
             }
         }
 
@@ -738,7 +784,7 @@ fun PluviaMain(
                             versionName = updateInfo.versionName,
                             onProgress = { progress ->
                                 viewModel.setLoadingDialogProgress(progress)
-                            }
+                            },
                         )
 
                         viewModel.setLoadingDialogVisible(false)
@@ -803,7 +849,13 @@ fun PluviaMain(
             state = gameFeedbackState,
             onStateChange = { gameFeedbackState = it },
             onSubmit = { feedbackState ->
-                Timber.d("GameFeedback: onSubmit called with rating=${feedbackState.rating}, tags=${feedbackState.selectedTags}, text=${feedbackState.feedbackText.take(20)}")
+                Timber.d(
+                    "GameFeedback: onSubmit called with rating=${feedbackState.rating}, tags=${feedbackState.selectedTags}, text=${
+                        feedbackState.feedbackText.take(
+                            20,
+                        )
+                    }",
+                )
                 try {
                     // Get the container for the app
                     val appId = feedbackState.appId
@@ -858,10 +910,25 @@ fun PluviaMain(
             BootingSplash(
                 visible = state.showBootingSplash,
                 text = state.bootingSplashText,
-                onBootCompleted = {
-                    viewModel.setShowBootingSplash(false)
-                },
             )
+        }
+
+        // Connection status banner (overlay)
+        if (state.currentScreen != PluviaScreen.LoginUser) {
+            Box(modifier = Modifier.zIndex(5f)) {
+                ConnectionStatusBanner(
+                    connectionState = state.connectionState,
+                    connectionMessage = state.connectionMessage,
+                    timeoutSeconds = state.connectionTimeoutSeconds,
+                    onContinueOffline = {
+                        viewModel.continueOffline()
+                    },
+                    onRetry = {
+                        viewModel.retryConnection()
+                        context.startForegroundService(Intent(context, SteamService::class.java))
+                    },
+                )
+            }
         }
 
         NavHost(
@@ -869,15 +936,15 @@ fun PluviaMain(
             startDestination = PluviaScreen.LoginUser.route,
         ) {
             /** Login **/
-            /** Login **/
             composable(route = PluviaScreen.LoginUser.route) {
                 UserLoginScreen(
+                    connectionState = state.connectionState,
+                    onRetryConnection = viewModel::retryConnection,
                     onContinueOffline = {
                         navController.navigate(PluviaScreen.Home.route + "?offline=true")
                     },
                 )
             }
-            /** Library, Downloads, Friends **/
             /** Library, Downloads, Friends **/
             composable(
                 route = PluviaScreen.Home.route + "?offline={offline}",
@@ -926,8 +993,6 @@ fun PluviaMain(
             }
 
             /** Full Screen Chat **/
-
-            /** Full Screen Chat **/
             composable(
                 route = "chat/{id}",
                 arguments = listOf(
@@ -948,8 +1013,6 @@ fun PluviaMain(
             }
 
             /** Game Screen **/
-
-            /** Game Screen **/
             composable(route = PluviaScreen.XServer.route) {
                 XServerScreen(
                     appId = state.launchedAppId,
@@ -962,7 +1025,7 @@ fun PluviaMain(
                         CoroutineScope(Dispatchers.Main).launch {
                             val currentRoute = navController.currentBackStackEntry
                                 ?.destination
-                                ?.route          // ← this is the screen’s route string
+                                ?.route // ← this is the screen’s route string
 
                             if (currentRoute == PluviaScreen.XServer.route) {
                                 navController.popBackStack()
@@ -980,8 +1043,6 @@ fun PluviaMain(
                     },
                 )
             }
-
-            /** Settings **/
 
             /** Settings **/
             composable(route = PluviaScreen.Settings.route) {
@@ -1045,7 +1106,9 @@ fun preLaunchApp(
                 context = context,
             ).await()
         }
-        if (container.containerVariant.equals(Container.GLIBC) && !SteamService.isFileInstallable(context, "imagefs_patches_gamenative.tzst")) {
+        if (container.containerVariant.equals(Container.GLIBC) &&
+            !SteamService.isFileInstallable(context, "imagefs_patches_gamenative.tzst")
+        ) {
             setLoadingMessage("Downloading Wine")
             SteamService.downloadImageFsPatches(
                 onDownloadProgress = { setLoadingProgress(it / 1.0f) },
@@ -1053,31 +1116,37 @@ fun preLaunchApp(
                 context = context,
             ).await()
         } else {
-            if (container.wineVersion.contains("proton-9.0-arm64ec") && !SteamService.isFileInstallable(context, "proton-9.0-arm64ec.txz")) {
+            if (container.wineVersion.contains("proton-9.0-arm64ec") &&
+                !SteamService.isFileInstallable(context, "proton-9.0-arm64ec.txz")
+            ) {
                 setLoadingMessage("Downloading arm64ec Proton")
                 SteamService.downloadFile(
                     onDownloadProgress = { setLoadingProgress(it / 1.0f) },
                     this,
                     context = context,
-                    "proton-9.0-arm64ec.txz"
+                    "proton-9.0-arm64ec.txz",
                 ).await()
-            } else if (container.wineVersion.contains("proton-9.0-x86_64") && !SteamService.isFileInstallable(context, "proton-9.0-x86_64.txz")) {
+            } else if (container.wineVersion.contains("proton-9.0-x86_64") &&
+                !SteamService.isFileInstallable(context, "proton-9.0-x86_64.txz")
+            ) {
                 setLoadingMessage("Downloading x86_64 Proton")
                 SteamService.downloadFile(
                     onDownloadProgress = { setLoadingProgress(it / 1.0f) },
                     this,
                     context = context,
-                    "proton-9.0-x86_64.txz"
+                    "proton-9.0-x86_64.txz",
                 ).await()
             }
         }
-        if (!container.isUseLegacyDRM && !container.isLaunchRealSteam && !SteamService.isFileInstallable(context, "experimental-drm.tzst")) {
+        if (!container.isUseLegacyDRM && !container.isLaunchRealSteam &&
+            !SteamService.isFileInstallable(context, "experimental-drm.tzst")
+        ) {
             setLoadingMessage("Downloading extras")
             SteamService.downloadFile(
                 onDownloadProgress = { setLoadingProgress(it / 1.0f) },
                 this,
                 context = context,
-                "experimental-drm.tzst"
+                "experimental-drm.tzst",
             ).await()
         }
         if (container.isLaunchRealSteam && !SteamService.isFileInstallable(context, "steam.tzst")) {
@@ -1088,10 +1157,11 @@ fun preLaunchApp(
                 context = context,
             ).await()
         }
-        val loadingMessage = if (container.containerVariant.equals(Container.GLIBC))
+        val loadingMessage = if (container.containerVariant.equals(Container.GLIBC)) {
             context.getString(R.string.main_installing_glibc)
-        else
+        } else {
             context.getString(R.string.main_installing_bionic)
+        }
         setLoadingMessage(loadingMessage)
         val imageFsInstallSuccess =
             ImageFsInstaller.installIfNeededFuture(context, context.assets, container) { progress ->
@@ -1122,7 +1192,9 @@ fun preLaunchApp(
                 )
                 return@launch
             }
-        } catch (_: Exception) { /* ignore persona read errors */ }
+        } catch (_: Exception) {
+            /* ignore persona read errors */
+        }
 
         // For Custom Games, bypass Steam Cloud operations entirely and proceed to launch
         if (isCustomGame) {
@@ -1157,7 +1229,7 @@ fun preLaunchApp(
                         message = context.getString(
                             R.string.main_save_conflict_message,
                             Date(postSyncInfo.localTimestamp).toString(),
-                            Date(postSyncInfo.remoteTimestamp).toString()
+                            Date(postSyncInfo.remoteTimestamp).toString(),
                         ),
                         dismissBtnText = context.getString(R.string.main_keep_local),
                         confirmBtnText = context.getString(R.string.main_keep_remote),
@@ -1200,6 +1272,7 @@ fun preLaunchApp(
                     )
                 }
             }
+
             SyncResult.UnknownFail,
             SyncResult.DownloadFail,
             SyncResult.UpdateFail,
@@ -1218,11 +1291,11 @@ fun preLaunchApp(
             SyncResult.PendingOperations -> {
                 Timber.i(
                     "Pending remote operations:${
-                        postSyncInfo.pendingRemoteOperations.map { pro ->
+                        postSyncInfo.pendingRemoteOperations.joinToString("\n") { pro ->
                             "\n\tmachineName: ${pro.machineName}" +
                                 "\n\ttimestamp: ${Date(pro.timeLastUpdated * 1000L)}" +
                                 "\n\toperation: ${pro.operation}"
-                        }.joinToString("\n")
+                        }
                     }",
                 )
                 if (postSyncInfo.pendingRemoteOperations.size == 1) {
@@ -1242,7 +1315,7 @@ fun preLaunchApp(
                                         R.string.main_upload_in_progress_message,
                                         gameName,
                                         pro.machineName,
-                                        dateStr
+                                        dateStr,
                                     ),
                                     dismissBtnText = context.getString(R.string.ok),
                                 ),
@@ -1259,7 +1332,7 @@ fun preLaunchApp(
                                         R.string.main_pending_upload_message,
                                         gameName,
                                         pro.machineName,
-                                        dateStr
+                                        dateStr,
                                     ),
                                     confirmBtnText = context.getString(R.string.main_play_anyway),
                                     dismissBtnText = context.getString(R.string.cancel),
@@ -1277,7 +1350,7 @@ fun preLaunchApp(
                                         R.string.main_app_running_other_device,
                                         pro.machineName,
                                         gameName,
-                                        dateStr
+                                        dateStr,
                                     ),
                                     confirmBtnText = context.getString(R.string.main_play_anyway),
                                     dismissBtnText = context.getString(R.string.cancel),

@@ -42,7 +42,6 @@ fun BootingSplash(
     visible: Boolean = true,
     text: String = "Initializing...",
     progress: Float = -1f, // -1 for indeterminate, 0-1 for determinate
-    onBootCompleted: () -> Unit = {},
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "bootSplash")
 

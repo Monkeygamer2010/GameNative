@@ -3,6 +3,7 @@ package app.gamenative.ui.screen.settings
 import android.content.res.Configuration
 import android.os.Environment
 import android.os.storage.StorageManager
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
@@ -14,8 +15,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material3.Text
@@ -25,6 +28,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.res.stringResource
 import app.gamenative.R
 import app.gamenative.PrefManager
@@ -38,12 +42,11 @@ import kotlinx.serialization.json.Json
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.Color
+import app.gamenative.ui.theme.PluviaTheme
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.tooling.preview.Preview
 import app.gamenative.ui.component.settings.SettingsListDropdown
-import app.gamenative.ui.theme.PluviaTheme
 import androidx.compose.ui.viewinterop.AndroidView
 import android.widget.ImageView
 import app.gamenative.utils.IconSwitcher
@@ -94,7 +97,7 @@ fun SettingsGroupInterface(
     val languageNames = remember { LocaleHelper.getSupportedLanguageNames() }
     var selectedLanguageIndex by rememberSaveable {
         mutableStateOf(
-            languageCodes.indexOf(PrefManager.appLanguage).takeIf { it >= 0 } ?: 0
+            languageCodes.indexOf(PrefManager.appLanguage).takeIf { it >= 0 } ?: 0,
         )
     }
 
@@ -110,11 +113,16 @@ fun SettingsGroupInterface(
         autoEntries + otherEntries.sortedBy { it.second }
     }
     var openRegionDialog by rememberSaveable { mutableStateOf(false) }
-    var selectedRegionIndex by rememberSaveable { mutableStateOf(
-        steamRegionsList.indexOfFirst { it.first == PrefManager.cellId }.takeIf { it >= 0 } ?: 0
-    ) }
+    var selectedRegionIndex by rememberSaveable {
+        mutableStateOf(
+            steamRegionsList.indexOfFirst { it.first == PrefManager.cellId }.takeIf { it >= 0 } ?: 0,
+        )
+    }
 
-    SettingsGroup(title = { Text(text = stringResource(R.string.settings_interface_title)) }) {
+    SettingsGroup(
+        modifier = Modifier.background(Color.Transparent),
+        title = { Text(text = stringResource(R.string.settings_interface_title)) },
+    ) {
         SettingsSwitch(
             colors = settingsTileColorsAlt(),
             title = { Text(text = stringResource(R.string.settings_interface_external_links_title)) },
@@ -145,13 +153,16 @@ fun SettingsGroupInterface(
             colors = settingsTileColorsAlt(),
             title = { Text(text = stringResource(R.string.settings_language)) },
             subtitle = { Text(text = LocaleHelper.getLanguageDisplayName(PrefManager.appLanguage)) },
-            onClick = { openLanguageDialog = true }
+            onClick = { openLanguageDialog = true },
         )
 
         // Unified visual icon picker (affects app and notification icons)
         var selectedVariant by rememberSaveable { mutableStateOf(if (PrefManager.useAltLauncherIcon || PrefManager.useAltNotificationIcon) 1 else 0) }
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text(text = stringResource(R.string.settings_interface_icon_style))
+            Text(
+                text = stringResource(R.string.settings_interface_icon_style),
+                color = MaterialTheme.colorScheme.onSurface,
+            )
             Spacer(modifier = Modifier.size(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 IconVariantCard(
@@ -183,7 +194,10 @@ fun SettingsGroupInterface(
     }
 
     // Downloads settings
-    SettingsGroup(title = { Text(text = stringResource(R.string.settings_downloads_title)) }) {
+    SettingsGroup(
+        modifier = Modifier.background(Color.Transparent),
+        title = { Text(text = stringResource(R.string.settings_downloads_title)) },
+    ) {
         var wifiOnlyDownload by rememberSaveable { mutableStateOf(PrefManager.downloadOnWifiOnly) }
         SettingsSwitch(
             colors = settingsTileColorsAlt(),
@@ -201,26 +215,27 @@ fun SettingsGroupInterface(
             stringResource(R.string.settings_download_slow),
             stringResource(R.string.settings_download_medium),
             stringResource(R.string.settings_download_fast),
-            stringResource(R.string.settings_download_blazing)
+            stringResource(R.string.settings_download_blazing),
         )
         val downloadSpeedValues = remember { listOf(8, 16, 24, 32) }
         var downloadSpeedValue by rememberSaveable {
             mutableStateOf(
-                downloadSpeedValues.indexOf(PrefManager.downloadSpeed).takeIf { it >= 0 }?.toFloat() ?: 2f
+                downloadSpeedValues.indexOf(PrefManager.downloadSpeed).takeIf { it >= 0 }?.toFloat() ?: 2f,
             )
         }
         Column(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
             Text(
                 text = stringResource(R.string.settings_download_speed),
-                style = androidx.compose.material3.MaterialTheme.typography.titleMedium
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
             )
             Spacer(modifier = Modifier.size(4.dp))
             Text(
                 text = stringResource(R.string.settings_download_heat_warning),
-                style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
-                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.size(8.dp))
             Slider(
@@ -236,15 +251,15 @@ fun SettingsGroupInterface(
             // Labels below slider
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 downloadSpeedLabels.forEach { label ->
                     Text(
                         text = label,
-                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
-                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
-                        modifier = Modifier.width(60.dp)
+                        modifier = Modifier.width(60.dp),
                     )
                 }
             }
@@ -270,7 +285,7 @@ fun SettingsGroupInterface(
         var useExternalStorage by rememberSaveable { mutableStateOf(PrefManager.useExternalStorage) }
         SettingsSwitch(
             colors = settingsTileColorsAlt(),
-            enabled  = dirs.isNotEmpty(),
+            enabled = dirs.isNotEmpty(),
             title = { Text(text = stringResource(R.string.settings_interface_external_storage_title)) },
             subtitle = {
                 if (dirs.isEmpty())
@@ -292,7 +307,7 @@ fun SettingsGroupInterface(
             var selectedIndex by rememberSaveable {
                 mutableStateOf(
                     dirs.indexOfFirst { it.absolutePath == PrefManager.externalStoragePath }
-                        .takeIf { it >= 0 } ?: 0
+                        .takeIf { it >= 0 } ?: 0,
                 )
             }
             SettingsListDropdown(
@@ -303,15 +318,17 @@ fun SettingsGroupInterface(
                     selectedIndex = idx
                     PrefManager.externalStoragePath = dirs[idx].absolutePath
                 },
-                colors = settingsTileColorsAlt()
+                colors = settingsTileColorsAlt(),
             )
         }
         // Steam download server selection
         SettingsMenuLink(
             colors = settingsTileColorsAlt(),
             title = { Text(text = stringResource(R.string.settings_interface_download_server_title)) },
-            subtitle = { Text(text = steamRegionsList.getOrNull(selectedRegionIndex)?.second ?: stringResource(R.string.settings_region_default)) },
-            onClick = { openRegionDialog = true }
+            subtitle = {
+                Text(text = steamRegionsList.getOrNull(selectedRegionIndex)?.second ?: stringResource(R.string.settings_region_default))
+            },
+            onClick = { openRegionDialog = true },
         )
     }
 
@@ -329,7 +346,7 @@ fun SettingsGroupInterface(
             PrefManager.cellId = selectedId
             PrefManager.cellIdManuallySet = selectedId != 0
         },
-        onDismiss = { openRegionDialog = false }
+        onDismiss = { openRegionDialog = false },
     )
 
     // Status bar restart confirmation dialog
@@ -358,7 +375,7 @@ fun SettingsGroupInterface(
             // Revert toggle to original value
             hideStatusBar = PrefManager.hideStatusBarWhenNotInGame
             pendingStatusBarValue = null
-        }
+        },
     )
 
     // Loading dialog while saving and restarting
@@ -379,7 +396,7 @@ fun SettingsGroupInterface(
     LoadingDialog(
         visible = showStatusBarLoadingDialog,
         progress = -1f, // Indeterminate progress
-        message = context.getString(R.string.settings_saving_restarting)
+        message = context.getString(R.string.settings_saving_restarting),
     )
 
     // Language selection dialog
@@ -400,7 +417,7 @@ fun SettingsGroupInterface(
             }
             openLanguageDialog = false
         },
-        onDismiss = { openLanguageDialog = false }
+        onDismiss = { openLanguageDialog = false },
     )
 
     // Language change restart confirmation dialog
@@ -429,7 +446,7 @@ fun SettingsGroupInterface(
             // Revert selection to original value
             selectedLanguageIndex = languageCodes.indexOf(PrefManager.appLanguage).takeIf { it >= 0 } ?: 0
             pendingLanguageCode = null
-        }
+        },
     )
 
     // Loading dialog while saving and restarting for language change
@@ -450,7 +467,7 @@ fun SettingsGroupInterface(
     LoadingDialog(
         visible = showLanguageLoadingDialog,
         progress = -1f, // Indeterminate progress
-        message = stringResource(R.string.settings_language_changing)
+        message = stringResource(R.string.settings_language_changing),
     )
 }
 
@@ -463,7 +480,10 @@ private fun IconVariantCard(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    val border = if (selected) BorderStroke(2.dp, Color(0xFF4F46E5)) else BorderStroke(1.dp, Color(0x33404040))
+    val border = if (selected) BorderStroke(2.dp, PluviaTheme.colors.accentPurple) else BorderStroke(
+        1.dp,
+        PluviaTheme.colors.borderDefault.copy(alpha = 0.5f),
+    )
     Card(
         modifier = Modifier
             .clickable { onClick() },
@@ -497,10 +517,13 @@ private fun IconVariantCard(
 @Preview(uiMode = Configuration.UI_MODE_NIGHT_YES or Configuration.UI_MODE_TYPE_NORMAL)
 @Composable
 private fun Preview_SettingsScreen() {
-    val context = LocalContext.current
-    PrefManager.init(context)
+    val isPreview = LocalInspectionMode.current
+    if (!isPreview) {
+        val context = LocalContext.current
+        PrefManager.init(context)
+    }
     PluviaTheme {
-        SettingsGroupInterface (
+        SettingsGroupInterface(
             appTheme = AppTheme.DAY,
             paletteStyle = PaletteStyle.TonalSpot,
             onAppTheme = { },

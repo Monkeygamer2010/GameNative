@@ -4,6 +4,8 @@ import app.gamenative.PrefManager
 import app.gamenative.data.GameCompatibilityStatus
 import app.gamenative.data.LibraryItem
 import app.gamenative.ui.enums.AppFilter
+import app.gamenative.ui.enums.LibraryTab
+import app.gamenative.ui.enums.SortOption
 import java.util.EnumSet
 
 data class LibraryState(
@@ -24,14 +26,23 @@ data class LibraryState(
     // App Source filters (Steam / Custom Games)
     val showSteamInLibrary: Boolean = PrefManager.showSteamInLibrary,
     val showCustomGamesInLibrary: Boolean = PrefManager.showCustomGamesInLibrary,
-    
+
     // Loading state for skeleton loaders
     val isLoading: Boolean = false,
-    
+
     // Refresh counter that increments when custom game images are fetched
     // Used to trigger UI recomposition to show newly downloaded images
     val imageRefreshCounter: Long = 0,
-    
+
     // Compatibility status map: game name -> compatibility status
     val compatibilityMap: Map<String, GameCompatibilityStatus> = emptyMap(),
+
+    // Sort option for the library
+    val currentSortOption: SortOption = PrefManager.librarySortOption,
+
+    // Options panel open state
+    val isOptionsPanelOpen: Boolean = false,
+
+    // Current library tab for quick filter access
+    val currentTab: LibraryTab = LibraryTab.ALL,
 )

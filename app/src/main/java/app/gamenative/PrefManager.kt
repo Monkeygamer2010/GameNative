@@ -17,7 +17,6 @@ import app.gamenative.enums.AppTheme
 import app.gamenative.ui.enums.AppFilter
 import app.gamenative.ui.enums.HomeDestination
 import app.gamenative.ui.enums.Orientation
-import app.gamenative.Constants
 import app.gamenative.ui.enums.PaneType
 import com.materialkolor.PaletteStyle
 import com.winlator.box86_64.Box86_64Preset
@@ -542,6 +541,16 @@ object PrefManager {
             setPref(LIBRARY_FILTER, AppFilter.toFlags(value))
         }
 
+    private val LIBRARY_SORT = intPreferencesKey("library_sort")
+    var librarySortOption: app.gamenative.ui.enums.SortOption
+        get() {
+            val value = getPref(LIBRARY_SORT, app.gamenative.ui.enums.SortOption.INSTALLED_FIRST.ordinal)
+            return app.gamenative.ui.enums.SortOption.fromOrdinal(value)
+        }
+        set(value) {
+            setPref(LIBRARY_SORT, value.ordinal)
+        }
+
     /**
      * Get or Set the last known Persona State. See [EPersonaState]
      */
@@ -731,17 +740,6 @@ object PrefManager {
         get() = getPref(EXTERNAL_STORAGE_PATH, "")
         set(value) {
             setPref(EXTERNAL_STORAGE_PATH, value)
-        }
-
-    // Custom Games root (additional paths). Default path is provided by the app at runtime and isn't stored here.
-    private val CUSTOM_GAME_PATHS = stringPreferencesKey("custom_game_paths")
-    var customGamePaths: Set<String>
-        get() {
-            val value = getPref(CUSTOM_GAME_PATHS, "[]")
-            return try { Json.decodeFromString<Set<String>>(value) } catch (e: Exception) { emptySet() }
-        }
-        set(value) {
-            setPref(CUSTOM_GAME_PATHS, Json.encodeToString(value))
         }
 
     private val CUSTOM_GAME_MANUAL_FOLDERS = stringPreferencesKey("custom_game_manual_folders")
