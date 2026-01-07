@@ -6,6 +6,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
@@ -38,10 +39,12 @@ class ExternalOnScreenKeyboardView(
     )
 
     private val keyButtons = mutableListOf<KeyButton>()
+    private val downKeys = mutableSetOf<XKeycode>()
     private var shiftState: ShiftState = ShiftState.OFF
 
     init {
         orientation = VERTICAL
+        setMotionEventSplittingEnabled(true)
         val padding = dp(8)
         setPadding(padding, padding, padding, padding)
         setBackgroundColor(0xFF1F1F1F.toInt())
@@ -158,7 +161,10 @@ class ExternalOnScreenKeyboardView(
                 layoutParams = LayoutParams(0, height, spec.weight).apply {
                     setMargins(margin, margin, margin, margin)
                 }
-                setOnClickListener { handleKeyPress(spec) }
+                setOnTouchListener { _, event ->
+                    handleKeyTouch(spec, event)
+                    false
+                }
             }
             keyButtons += KeyButton(spec, button)
             row.addView(button)
@@ -167,18 +173,25 @@ class ExternalOnScreenKeyboardView(
         addView(row)
     }
 
-    private fun handleKeyPress(spec: KeySpec) {
+    private fun handleKeyTouch(spec: KeySpec, event: MotionEvent) {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> onKeyDown(spec)
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> onKeyUp(spec, cancel = event.actionMasked == MotionEvent.ACTION_CANCEL)
+        }
+    }
+
+    private fun onKeyDown(spec: KeySpec) {
         when (spec.action) {
-            Action.SHIFT -> cycleShift()
-            Action.BACKSPACE -> tapKey(XKeycode.KEY_BKSP)
-            Action.ENTER -> tapKey(XKeycode.KEY_ENTER)
-            Action.SPACE -> tapKey(XKeycode.KEY_SPACE)
-            Action.TAB -> tapKey(XKeycode.KEY_TAB)
-            Action.ESC -> tapKey(XKeycode.KEY_ESC)
-            Action.ARROW_LEFT -> tapKey(XKeycode.KEY_LEFT)
-            Action.ARROW_DOWN -> tapKey(XKeycode.KEY_DOWN)
-            Action.ARROW_RIGHT -> tapKey(XKeycode.KEY_RIGHT)
-            Action.ARROW_UP -> tapKey(XKeycode.KEY_UP)
+            Action.SHIFT -> Unit
+            Action.BACKSPACE -> pressKey(XKeycode.KEY_BKSP)
+            Action.ENTER -> pressKey(XKeycode.KEY_ENTER)
+            Action.SPACE -> pressKey(XKeycode.KEY_SPACE)
+            Action.TAB -> pressKey(XKeycode.KEY_TAB)
+            Action.ESC -> pressKey(XKeycode.KEY_ESC)
+            Action.ARROW_LEFT -> pressKey(XKeycode.KEY_LEFT)
+            Action.ARROW_DOWN -> pressKey(XKeycode.KEY_DOWN)
+            Action.ARROW_RIGHT -> pressKey(XKeycode.KEY_RIGHT)
+            Action.ARROW_UP -> pressKey(XKeycode.KEY_UP)
             Action.INPUT -> {
                 val keycode = spec.keycode ?: return
                 val useShift = when (shiftState) {
@@ -186,12 +199,28 @@ class ExternalOnScreenKeyboardView(
                     ShiftState.ON -> true
                     ShiftState.CAPS -> spec.isLetter
                 }
-                tapKey(keycode, useShift)
+                pressKey(keycode, withShift = useShift)
                 if (shiftState == ShiftState.ON) {
                     shiftState = ShiftState.OFF
                     refreshLabels()
                 }
             }
+        }
+    }
+
+    private fun onKeyUp(spec: KeySpec, cancel: Boolean) {
+        when (spec.action) {
+            Action.SHIFT -> if (!cancel) cycleShift()
+            Action.BACKSPACE -> releaseKey(XKeycode.KEY_BKSP)
+            Action.ENTER -> releaseKey(XKeycode.KEY_ENTER)
+            Action.SPACE -> releaseKey(XKeycode.KEY_SPACE)
+            Action.TAB -> releaseKey(XKeycode.KEY_TAB)
+            Action.ESC -> releaseKey(XKeycode.KEY_ESC)
+            Action.ARROW_LEFT -> releaseKey(XKeycode.KEY_LEFT)
+            Action.ARROW_DOWN -> releaseKey(XKeycode.KEY_DOWN)
+            Action.ARROW_RIGHT -> releaseKey(XKeycode.KEY_RIGHT)
+            Action.ARROW_UP -> releaseKey(XKeycode.KEY_UP)
+            Action.INPUT -> spec.keycode?.let { releaseKey(it) }
         }
     }
 
@@ -233,14 +262,28 @@ class ExternalOnScreenKeyboardView(
         }
     }
 
-    private fun tapKey(key: XKeycode, withShift: Boolean = false) {
-        if (withShift) xServer.injectKeyPress(XKeycode.KEY_SHIFT_L)
+    private fun pressKey(key: XKeycode, withShift: Boolean = false) {
+        if (!downKeys.add(key)) return
+        val shiftWasDown = xServer.keyboard.modifiersMask.isSet(1)
+        if (withShift && !shiftWasDown) xServer.injectKeyPress(XKeycode.KEY_SHIFT_L)
         xServer.injectKeyPress(key)
+        if (withShift && !shiftWasDown) xServer.injectKeyRelease(XKeycode.KEY_SHIFT_L)
+    }
+
+    private fun releaseKey(key: XKeycode) {
+        if (!downKeys.remove(key)) return
         xServer.injectKeyRelease(key)
-        if (withShift) xServer.injectKeyRelease(XKeycode.KEY_SHIFT_L)
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    override fun onDetachedFromWindow() {
+        downKeys.toList().forEach { key ->
+            xServer.injectKeyRelease(key)
+        }
+        downKeys.clear()
+        super.onDetachedFromWindow()
+    }
 
     private fun createKeyBackground(
         normal: Boolean = false,
