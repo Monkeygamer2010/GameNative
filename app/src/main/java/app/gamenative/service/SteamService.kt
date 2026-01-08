@@ -1270,7 +1270,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                         val depotDownloader = DepotDownloader(
                             instance!!.steamClient!!,
                             licenses,
-                            debug = true,
+                            debug = false,
                             androidEmulation = true,
                             maxDownloads = maxDownloads,
                             maxDecompress = maxDecompress,
