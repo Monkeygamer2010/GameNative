@@ -215,6 +215,9 @@ object SteamUtils {
         // Restore unpacked executable if it exists (for DRM-free mode)
         restoreUnpackedExecutable(context, steamAppId)
 
+        // Restore original steamclient.dll files if they exist
+        restoreSteamclientFiles(context, steamAppId)
+
         // Create Steam ACF manifest for real Steam compatibility
         createAppManifest(context, steamAppId)
         MarkerUtils.addMarker(appDirPath, Marker.STEAM_DLL_REPLACED)
@@ -233,6 +236,10 @@ object SteamUtils {
         }
         MarkerUtils.removeMarker(appDirPath, Marker.STEAM_DLL_REPLACED)
         MarkerUtils.removeMarker(appDirPath, Marker.STEAM_DLL_RESTORED)
+
+        // Make a backup before extracting
+        backupSteamclientFiles(context, steamAppId)
+
         val imageFs = ImageFs.find(context)
         val downloaded = File(imageFs.getFilesDir(), "experimental-drm-20260101.tzst")
         TarCompressorUtils.extract(
@@ -248,6 +255,62 @@ object SteamUtils {
         ensureSteamSettings(context, File(container.getRootDir(), ".wine/drive_c/Program Files (x86)/Steam/steamclient.dll").toPath(), appId, ticketBase64)
 
         MarkerUtils.addMarker(appDirPath, Marker.STEAM_COLDCLIENT_USED)
+    }
+
+    fun steamClientFiles() : Array<String> {
+        return arrayOf(
+            "GameOverlayRenderer.dll",
+            "GameOverlayRenderer64.dll",
+            "steamclient.dll",
+            "steamclient64.dll",
+            "steamclient_loader_x32.exe",
+            "steamclient_loader_x64.exe",
+        )
+    }
+
+    fun backupSteamclientFiles(context: Context, steamAppId: Int) {
+        val imageFs = ImageFs.find(context)
+
+        var backupCount = 0
+
+        val backupDir = File(imageFs.wineprefix, "drive_c/Program Files (x86)/Steam/steamclient_backup")
+        backupDir.mkdirs()
+
+        steamClientFiles().forEach { file ->
+            val dll = File(imageFs.wineprefix, "drive_c/Program Files (x86)/Steam/$file")
+            if (dll.exists()) {
+                Files.copy(dll.toPath(), File(backupDir, "$file.orig").toPath(), StandardCopyOption.REPLACE_EXISTING)
+                backupCount++
+            }
+        }
+
+        Timber.i("Finished backupSteamclientFiles for appId: $steamAppId. Backed up $backupCount file(s)")
+    }
+
+    fun restoreSteamclientFiles(context: Context, steamAppId: Int) {
+        val imageFs = ImageFs.find(context)
+
+        var restoredCount = 0
+
+        val origDir = File(imageFs.wineprefix, "drive_c/Program Files (x86)/Steam")
+
+        val backupDir = File(imageFs.wineprefix, "drive_c/Program Files (x86)/Steam/steamclient_backup")
+        if (backupDir.exists()) {
+            steamClientFiles().forEach { file ->
+                val dll = File(backupDir, "$file.orig")
+                if (dll.exists()) {
+                    Files.copy(dll.toPath(), File(origDir, file).toPath(), StandardCopyOption.REPLACE_EXISTING)
+                    restoredCount++
+                }
+            }
+        }
+
+        val extraDllDir = File(imageFs.wineprefix, "drive_c/Program Files (x86)/Steam/extra_dlls")
+        if (extraDllDir.exists()) {
+            extraDllDir.deleteRecursively()
+        }
+
+        Timber.i("Finished restoreSteamclientFiles for appId: $steamAppId. Restored $restoredCount file(s)")
     }
 
     internal fun writeColdClientIni(steamAppId: Int, container: Container) {
@@ -276,12 +339,13 @@ object SteamUtils {
         )
     }
 
-    private fun autoLoginUserChanges(imageFs: ImageFs) {
+    fun autoLoginUserChanges(imageFs: ImageFs) {
         val vdfFileText = SteamService.getLoginUsersVdfOauth(
             steamId64 = SteamService.userSteamId?.convertToUInt64().toString(),
             account = PrefManager.username,
             refreshToken = PrefManager.refreshToken,
             accessToken = PrefManager.accessToken,      // may be blank
+            personaName = SteamService.instance?.localPersona?.value?.name!!
         )
         val steamConfigDir = File(imageFs.wineprefix, "drive_c/Program Files (x86)/Steam/config")
         try {
@@ -293,7 +357,6 @@ object SteamUtils {
             val hkcu = "Software\\Valve\\Steam"
             WineRegistryEditor(userRegFile).use { reg ->
                 reg.setStringValue("Software\\Valve\\Steam", "AutoLoginUser", PrefManager.username)
-                reg.setDwordValue("Software\\Valve\\Steam", "RememberPassword", 1)
                 reg.setStringValue(hkcu, "SteamExe", steamExe)
                 reg.setStringValue(hkcu, "SteamPath", steamRoot)
                 reg.setStringValue(hkcu, "InstallPath", steamRoot)
@@ -633,6 +696,9 @@ object SteamUtils {
         // Restore original executable if it exists (for real Steam mode)
         restoreOriginalExecutable(context, steamAppId)
 
+        // Restore original steamclient.dll files if they exist
+        restoreSteamclientFiles(context, steamAppId)
+
         // Create Steam ACF manifest for real Steam compatibility
         createAppManifest(context, steamAppId)
         MarkerUtils.addMarker(appDirPath, Marker.STEAM_DLL_RESTORED)
@@ -743,10 +809,10 @@ object SteamUtils {
 
         val configsIni = settingsDir.resolve("configs.user.ini")
         val accountName   = PrefManager.username
-        val accountSteamId = SteamService.userSteamId?.convertToUInt64()?.toString() 
+        val accountSteamId = SteamService.userSteamId?.convertToUInt64()?.toString()
             ?: PrefManager.steamUserSteamId64.takeIf { it != 0L }?.toString()
             ?: "0"
-        val accountId = SteamService.userSteamId?.accountID 
+        val accountId = SteamService.userSteamId?.accountID
             ?: PrefManager.steamUserAccountId.takeIf { it != 0 }?.toLong()
             ?: 0L
         val container = ContainerUtils.getOrCreateContainer(context, appId)
