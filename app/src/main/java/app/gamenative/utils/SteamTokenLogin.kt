@@ -47,7 +47,7 @@ class SteamTokenLogin(
     }
 
     private fun execCommand(command: String) : String {
-        return guestProgramLauncherComponent?.execShellCommand(command)
+        return guestProgramLauncherComponent?.execShellCommand(command, false)
             ?: throw IllegalStateException("GuestProgramLauncherComponent is required for command execution")
     }
 
