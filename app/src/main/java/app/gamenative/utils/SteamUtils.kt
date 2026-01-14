@@ -19,6 +19,7 @@ import com.winlator.container.ContainerManager
 import com.winlator.core.TarCompressorUtils
 import com.winlator.core.WineRegistryEditor
 import com.winlator.xenvironment.ImageFs
+import `in`.dragonbra.javasteam.types.KeyValue
 import `in`.dragonbra.javasteam.util.HardwareUtils
 import java.io.File
 import java.io.FileOutputStream
@@ -677,6 +678,10 @@ object SteamUtils {
                 cfgFile.writeText("BootStrapperInhibitAll=Enable\nBootStrapperForceSelfUpdate=False")
             }
         }
+
+        // Update or modify localconfig.vdf
+        updateOrModifyLocalConfig(imageFs, container, steamAppId.toString(), SteamService.userSteamId!!.accountID.toString())
+
         skipFirstTimeSteamSetup(imageFs.rootDir)
         val appDirPath = SteamService.getAppDirPath(steamAppId)
         if (MarkerUtils.hasMarker(appDirPath, Marker.STEAM_DLL_RESTORED)) {
@@ -1105,6 +1110,54 @@ object SteamUtils {
                 }
             }
         })
+    }
+
+    fun updateOrModifyLocalConfig(imageFs: ImageFs, container: Container, appId: String, steamUserId64: String) {
+        try {
+            val exeCommandLine = container.execArgs
+
+            val steamPath = File(imageFs.wineprefix, "drive_c/Program Files (x86)/Steam")
+
+            // Create necessary directories
+            val userDataPath = File(steamPath, "userdata/$steamUserId64")
+            val configPath = File(userDataPath, "config")
+            configPath.mkdirs()
+
+            val localConfigFile = File(configPath, "localconfig.vdf")
+
+            if (localConfigFile.exists()) {
+                val vdfContent = FileUtils.readFileAsString(localConfigFile.absolutePath)
+                val vdfData = KeyValue.loadFromString(vdfContent!!)!!
+                val app = vdfData["Software"]["Valve"]["Steam"]["apps"][appId]
+                val option = app.children.firstOrNull { it.name == "LaunchOptions" }
+                if (option != null) {
+                    option.value = exeCommandLine.orEmpty()
+                } else {
+                    app.children.add(KeyValue("LaunchOptions", exeCommandLine))
+                }
+
+                vdfData.saveToFile(localConfigFile, false)
+            } else {
+                val vdfData = KeyValue(name = "UserLocalConfigStore")
+                val option = KeyValue("LaunchOptions", exeCommandLine)
+                val software = KeyValue("Software")
+                val valve = KeyValue("Valve")
+                val steam = KeyValue("Steam")
+                val apps = KeyValue("apps")
+                val app = KeyValue(appId)
+
+                app.children.add(option)
+                apps.children.add(app)
+                steam.children.add(apps)
+                valve.children.add(steam)
+                software.children.add(valve)
+                vdfData.children.add(software)
+
+                vdfData.saveToFile(localConfigFile, false)
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to update or modify local config")
+        }
     }
 
     fun getSteamId64(): Long? {
