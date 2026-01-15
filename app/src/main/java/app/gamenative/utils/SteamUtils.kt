@@ -14,8 +14,10 @@ import app.gamenative.enums.PathType
 import app.gamenative.service.SteamService
 import app.gamenative.service.SteamService.Companion.getAppDirName
 import app.gamenative.service.SteamService.Companion.getAppInfoOf
+import app.gamenative.utils.FileUtils.readFileAsString
 import com.winlator.container.Container
 import com.winlator.container.ContainerManager
+import com.winlator.core.FileUtils
 import com.winlator.core.TarCompressorUtils
 import com.winlator.core.WineRegistryEditor
 import com.winlator.xenvironment.ImageFs
@@ -83,8 +85,8 @@ object SteamUtils {
      */
     fun removeSpecialChars(s: String): String = s.replace(Regex("[^\\u0000-\\u007F]"), "")
 
-    private fun generateInterfacesFile(dllPath: Path) {
-        val outFile = dllPath.parent.resolve("steam_interfaces.txt")
+    private fun generateInterfacesFile(dllPath: Path, outputDir: Path? = null) {
+        val outFile = (outputDir ?: dllPath.parent).resolve("steam_interfaces.txt")
         if (Files.exists(outFile)) return          // already generated on a previous boot
 
         // -------- read DLL into memory ----------------------------------------
@@ -168,6 +170,17 @@ object SteamUtils {
         // Get ticket once for all DLLs
         val ticketBase64 = SteamService.instance?.getEncryptedAppTicketBase64(steamAppId)
 
+        // Get game executable directory for ensureSteamSettings
+        val container = ContainerUtils.getContainer(context, appId)
+        val executablePath = container.executablePath
+        val executableDir = if (executablePath.isNotEmpty() && executablePath.contains("/")) {
+            appDirPath + "/" + executablePath.substringBeforeLast("/", "")
+        } else {
+            appDirPath
+        }
+        val executableDirPath = Paths.get(executableDir)
+        var ensureSteamSettingsCalled = false
+
         rootPath.toFile().walkTopDown().maxDepth(10).forEach { file ->
             val path = file.toPath()
             if (!file.isFile || !path.name.startsWith("steam_api", ignoreCase = true)) return@forEach
@@ -192,7 +205,11 @@ object SteamUtils {
                 }
                 Timber.i("Replaced $dllName")
                 if (is64Bit) replaced64Count++ else replaced32Count++
-                ensureSteamSettings(context, path, appId, ticketBase64)
+                // Only call ensureSteamSettings once, using the game executable directory
+                if (!ensureSteamSettingsCalled) {
+                    ensureSteamSettings(context, executableDirPath, appId, ticketBase64)
+                    ensureSteamSettingsCalled = true
+                }
             }
         }
 
@@ -241,19 +258,46 @@ object SteamUtils {
         // Make a backup before extracting
         backupSteamclientFiles(context, steamAppId)
 
-        val imageFs = ImageFs.find(context)
-        val downloaded = File(imageFs.getFilesDir(), "experimental-drm-20260101.tzst")
-        TarCompressorUtils.extract(
-            TarCompressorUtils.Type.ZSTD,
-            downloaded,
-            imageFs.getRootDir(),
-        )
-        putBackSteamDlls(appDirPath)
+        // Get game executable directory
+        val executablePath = container.executablePath
+        val executableDir = if (executablePath.isNotEmpty() && executablePath.contains("/")) {
+            appDirPath + "/" + executablePath.substringBeforeLast("/", "")
+        } else {
+            appDirPath
+        }
+        val executableDirFile = File(executableDir)
+        executableDirFile.mkdirs()
+
+        // Copy 4 DLLs from assets to game executable directory
+        val dlls = listOf("winmm.dll", "coldloader.dll", "steamclient.dll", "steamclient64.dll")
+        dlls.forEach { dllName ->
+            try {
+                val targetFile = File(executableDirFile, dllName)
+                FileUtils.copy(context, "steampipe/$dllName", targetFile)
+                Timber.i("Copied $dllName to ${targetFile.absolutePath}")
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to copy $dllName to game executable directory")
+            }
+        }
+
         restoreUnpackedExecutable(context, steamAppId)
 
         // Get ticket and pass to ensureSteamSettings
         val ticketBase64 = SteamService.instance?.getEncryptedAppTicketBase64(steamAppId)
-        ensureSteamSettings(context, File(container.getRootDir(), ".wine/drive_c/Program Files (x86)/Steam/steamclient.dll").toPath(), appId, ticketBase64)
+        ensureSteamSettings(context, executableDirFile.toPath(), appId, ticketBase64)
+
+        // Generate steam_interfaces.txt in steam_settings folder from steamclient64.dll
+        val settingsDir = executableDirFile.toPath().resolve("steam_settings")
+        val steamclient64Dll = File(executableDirFile, "steamclient64.dll")
+        if (steamclient64Dll.exists()) {
+            generateInterfacesFile(steamclient64Dll.toPath(), settingsDir)
+        } else {
+            // Fallback to 32-bit steamclient.dll if 64-bit doesn't exist
+            val steamclientDll = File(executableDirFile, "steamclient.dll")
+            if (steamclientDll.exists()) {
+                generateInterfacesFile(steamclientDll.toPath(), settingsDir)
+            }
+        }
 
         MarkerUtils.addMarker(appDirPath, Marker.STEAM_COLDCLIENT_USED)
     }
@@ -785,16 +829,15 @@ object SteamUtils {
     /**
      * Sibling folder "steam_settings" + empty "offline.txt" file, no-ops if they already exist.
      */
-    private fun ensureSteamSettings(context: Context, dllPath: Path, appId: String, ticketBase64: String? = null) {
+    private fun ensureSteamSettings(context: Context, gameExeDir: Path, appId: String, ticketBase64: String? = null) {
         val steamAppId = ContainerUtils.extractGameIdFromContainerId(appId)
-        val steamDir = dllPath.parent
-        Files.createDirectories(steamDir)
-        val appIdFileUpper = dllPath.parent.resolve("steam_appid.txt")
+        Files.createDirectories(gameExeDir)
+        val appIdFileUpper = gameExeDir.resolve("steam_appid.txt")
         if (Files.notExists(appIdFileUpper)) {
             Files.createFile(appIdFileUpper)
             appIdFileUpper.toFile().writeText(steamAppId.toString())
         }
-        val settingsDir = dllPath.parent.resolve("steam_settings")
+        val settingsDir = gameExeDir.resolve("steam_settings")
         if (Files.notExists(settingsDir)) {
             Files.createDirectories(settingsDir)
         }
@@ -1126,7 +1169,7 @@ object SteamUtils {
             val localConfigFile = File(configPath, "localconfig.vdf")
 
             if (localConfigFile.exists()) {
-                val vdfContent = FileUtils.readFileAsString(localConfigFile.absolutePath)
+                val vdfContent = readFileAsString(localConfigFile.absolutePath)
                 val vdfData = KeyValue.loadFromString(vdfContent!!)!!
                 val app = vdfData["Software"]["Valve"]["Steam"]["apps"][appId]
                 val option = app.children.firstOrNull { it.name == "LaunchOptions" }
