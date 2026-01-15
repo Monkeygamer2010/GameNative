@@ -1848,27 +1848,23 @@ private fun getWineStartCommand(
                 container.executablePath = executablePath
                 container.saveData()
             }
-            if (container.isUseLegacyDRM) {
-                val appDirPath = SteamService.getAppDirPath(gameId)
-                val executableDir = appDirPath + "/" + executablePath.substringBeforeLast("/", "")
-                guestProgramLauncherComponent.workingDir = File(executableDir);
-                Timber.i("Working directory is ${executableDir}")
+            val appDirPath = SteamService.getAppDirPath(gameId)
+            val executableDir = appDirPath + "/" + executablePath.substringBeforeLast("/", "")
+            guestProgramLauncherComponent.workingDir = File(executableDir);
+            Timber.i("Working directory is ${executableDir}")
 
-                Timber.i("Final exe path is " + executablePath)
-                val drives = container.drives
-                val driveIndex = drives.indexOf(appDirPath)
-                // greater than 1 since there is the drive character and the colon before the app dir path
-                val drive = if (driveIndex > 1) {
-                    drives[driveIndex - 2]
-                } else {
-                    Timber.e("Could not locate game drive")
-                    'D'
-                }
-                envVars.put("WINEPATH", "$drive:/${appLaunchInfo.workingDir}")
-                "\"$drive:/${executablePath}\""
+            Timber.i("Final exe path is " + executablePath)
+            val drives = container.drives
+            val driveIndex = drives.indexOf(appDirPath)
+            // greater than 1 since there is the drive character and the colon before the app dir path
+            val drive = if (driveIndex > 1) {
+                drives[driveIndex - 2]
             } else {
-                "\"C:\\\\Program Files (x86)\\\\Steam\\\\steamclient_loader_x64.exe\""
+                Timber.e("Could not locate game drive")
+                'D'
             }
+            envVars.put("WINEPATH", "$drive:/${appLaunchInfo.workingDir}")
+            "\"$drive:/${executablePath}\""
         }
     }
 
