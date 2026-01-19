@@ -403,11 +403,13 @@ fun PluviaMain(
                 context.startForegroundService(Intent(context, SteamService::class.java))
             }
 
-            // Start GOGService if user has GOG credentials
+            // Start GOGService if user has GOG
             if (app.gamenative.service.gog.GOGService.hasStoredCredentials(context) &&
                 !app.gamenative.service.gog.GOGService.isRunning) {
-                Timber.d("[PluviaMain]: Starting GOGService for logged-in user")
+                Timber.tag("GOG").d("[PluviaMain]: Starting GOGService for logged-in user")
                 app.gamenative.service.gog.GOGService.start(context)
+            } else {
+                Timber.tag("GOG").d("GOG SERVICE Not going to start: ${app.gamenative.service.gog.GOGService.isRunning}")
             }
 
             if (SteamService.isLoggedIn && !SteamService.isGameRunning && state.currentScreen == PluviaScreen.LoginUser) {
@@ -1091,13 +1093,13 @@ fun preLaunchApp(
                 }
             }
         }
-        if (!container.isUseLegacyDRM && !container.isLaunchRealSteam && !SteamService.isFileInstallable(context, "experimental-drm-20260101.tzst")) {
+        if (!container.isUseLegacyDRM && !container.isLaunchRealSteam && !SteamService.isFileInstallable(context, "experimental-drm-20260116.tzst")) {
             setLoadingMessage("Downloading extras")
             SteamService.downloadFile(
                 onDownloadProgress = { setLoadingProgress(it / 1.0f) },
                 this,
                 context = context,
-                "experimental-drm-20260101.tzst"
+                "experimental-drm-20260116.tzst"
             ).await()
         }
         if (container.isLaunchRealSteam && !SteamService.isFileInstallable(context, "steam.tzst")) {
@@ -1106,6 +1108,15 @@ fun preLaunchApp(
                 onDownloadProgress = { setLoadingProgress(it / 1.0f) },
                 this,
                 context = context,
+            ).await()
+        }
+        if (container.isLaunchRealSteam && !SteamService.isFileInstallable(context, "steam-token.tzst")) {
+            setLoadingMessage("Downloading steam-token")
+            SteamService.downloadFile(
+                onDownloadProgress = { setLoadingProgress(it / 1.0f) },
+                this,
+                context = context,
+                "steam-token.tzst"
             ).await()
         }
         val loadingMessage = if (container.containerVariant.equals(Container.GLIBC))
@@ -1180,6 +1191,8 @@ fun preLaunchApp(
         val prefixToPath: (String) -> String = { prefix ->
             PathType.from(prefix).toAbsPath(context, gameId, SteamService.userSteamId!!.accountID)
         }
+        setLoadingMessage("Syncing cloud saves")
+        setLoadingProgress(-1f)
         val postSyncInfo = SteamService.beginLaunchApp(
             appId = gameId,
             prefixToPath = prefixToPath,
@@ -1187,6 +1200,10 @@ fun preLaunchApp(
             preferredSave = preferredSave,
             parentScope = this,
             isOffline = isOffline,
+            onProgress = { message, progress ->
+                setLoadingMessage(message)
+                setLoadingProgress(if (progress < 0) -1f else progress)
+            },
         ).await()
 
         setLoadingDialogVisible(false)
