@@ -48,11 +48,13 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -84,6 +86,11 @@ import app.gamenative.ui.theme.settingsTileColors
 import app.gamenative.ui.theme.settingsTileColorsAlt
 import app.gamenative.utils.CustomGameScanner
 import app.gamenative.utils.ContainerUtils
+import app.gamenative.utils.ManifestContentTypes
+import app.gamenative.utils.ManifestData
+import app.gamenative.utils.ManifestEntry
+import app.gamenative.utils.ManifestInstaller
+import app.gamenative.utils.ManifestRepository
 import app.gamenative.service.SteamService
 import com.winlator.contents.ContentProfile
 import com.winlator.contents.ContentsManager
@@ -106,6 +113,10 @@ import com.winlator.core.WineInfo.MAIN_WINE_VERSION
 import com.winlator.fexcore.FEXCoreManager
 import com.winlator.fexcore.FEXCorePresetManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
@@ -129,6 +140,86 @@ private fun winComponentsItemTitleRes(string: String): Int {
     }
 }
 
+private data class VersionOption(
+    val label: String,
+    val id: String,
+    val isManifest: Boolean,
+    val isInstalled: Boolean,
+)
+
+private data class VersionOptionList(
+    val labels: List<String>,
+    val ids: List<String>,
+    val muted: List<Boolean>,
+)
+
+private data class InstalledContentLists(
+    val dxvk: List<String>,
+    val vkd3d: List<String>,
+    val box64: List<String>,
+    val wowBox64: List<String>,
+    val fexcore: List<String>,
+    val wine: List<String>,
+    val proton: List<String>,
+)
+
+private data class DxvkContext(
+    val isVortekLike: Boolean,
+    val labels: List<String>,
+    val ids: List<String>,
+    val muted: List<Boolean>,
+)
+
+private fun buildVersionOptionList(
+    base: List<String>,
+    installed: List<String>,
+    manifest: List<ManifestEntry>,
+): VersionOptionList {
+    val options = LinkedHashMap<String, VersionOption>()
+
+    fun addOption(label: String, id: String, isManifest: Boolean, isInstalled: Boolean) {
+        val key = id.lowercase(Locale.ENGLISH)
+        if (!options.containsKey(key)) {
+            options[key] = VersionOption(label, id, isManifest, isInstalled)
+        }
+    }
+
+    base.forEach { label ->
+        val id = StringUtils.parseIdentifier(label)
+        addOption(label, id, isManifest = false, isInstalled = true)
+    }
+
+    installed.forEach { label ->
+        val id = StringUtils.parseIdentifier(label)
+        addOption(label, id, isManifest = false, isInstalled = true)
+    }
+
+    val availableIds = options.keys.toSet()
+    manifest.forEach { entry ->
+        val key = entry.id.lowercase(Locale.ENGLISH)
+        if (!options.containsKey(key)) {
+            val isInstalled = availableIds.contains(key)
+            val displayLabel = if (isInstalled) entry.name else entry.id
+            addOption(displayLabel, entry.id, isManifest = true, isInstalled = isInstalled)
+        }
+    }
+
+    val values = options.values.toList()
+    return VersionOptionList(
+        labels = values.map { it.label },
+        ids = values.map { it.id },
+        muted = values.map { it.isManifest && !it.isInstalled },
+    )
+}
+
+private fun filterManifestByVariant(entries: List<ManifestEntry>, variant: String?): List<ManifestEntry> {
+    if (variant.isNullOrBlank()) return entries
+    return entries.filter { entry ->
+        val entryVariant = entry.variant?.lowercase(Locale.ENGLISH)
+        entryVariant == variant.lowercase(Locale.ENGLISH) || entryVariant.isNullOrEmpty()
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ContainerConfigDialog(
@@ -141,6 +232,15 @@ fun ContainerConfigDialog(
 ) {
     if (visible) {
         val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        val installScope = remember {
+            CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        }
+        DisposableEffect(Unit) {
+            onDispose {
+                installScope.cancel()
+            }
+        }
 
         var config by rememberSaveable(stateSaver = ContainerData.Saver) {
             mutableStateOf(initialConfig)
@@ -201,8 +301,21 @@ fun ContainerConfigDialog(
         var dxvkVersionsAll by remember { mutableStateOf(dxvkVersionsBase) }
         var vkd3dVersions by remember { mutableStateOf(vkd3dVersionsBase) }
         var box64BionicVersions by remember { mutableStateOf(box64BionicVersionsBase) }
-        var wowBox64Versions by remember { mutableStateOf(wowBox64VersionsBase) } // reuse existing base list
+        var wowBox64Versions by remember { mutableStateOf(wowBox64VersionsBase) }
         var fexcoreVersions by remember { mutableStateOf(fexcoreVersionsBase) }
+        var installedWrapperDrivers by remember { mutableStateOf(emptyList<String>()) }
+        var installedDxvk by remember { mutableStateOf(emptyList<String>()) }
+        var installedVkd3d by remember { mutableStateOf(emptyList<String>()) }
+        var installedBox64 by remember { mutableStateOf(emptyList<String>()) }
+        var installedWowBox64 by remember { mutableStateOf(emptyList<String>()) }
+        var installedFexcore by remember { mutableStateOf(emptyList<String>()) }
+        var installedWine by remember { mutableStateOf(emptyList<String>()) }
+        var installedProton by remember { mutableStateOf(emptyList<String>()) }
+        var manifestData by remember { mutableStateOf(ManifestData.empty()) }
+        var manifestInstallInProgress by remember { mutableStateOf(false) }
+        var showManifestDownloadDialog by remember { mutableStateOf(false) }
+        var manifestDownloadProgress by remember { mutableStateOf(-1f) }
+        var manifestDownloadLabel by remember { mutableStateOf("") }
         var versionsLoaded by remember { mutableStateOf(false) }
         var showCustomResolutionDialog by remember { mutableStateOf(false) }
         var customResolutionValidationError by remember { mutableStateOf<String?>(null) }
@@ -214,40 +327,6 @@ fun ContainerConfigDialog(
             }
         }
 
-        LaunchedEffect(Unit) {
-            try {
-                val installed = AdrenotoolsManager(context).enumarateInstalledDrivers()
-                if (installed.isNotEmpty()) {
-                    wrapperVersions = (baseWrapperVersions + installed)
-                }
-            } catch (_: Exception) {}
-
-            // Enhance lists with installed contents
-            try {
-                val mgr = ContentsManager(context)
-                mgr.syncContents()
-
-                // Helper to convert ContentProfile list to display entries
-                fun profilesToDisplay(list: List<ContentProfile>?): List<String> {
-                    if (list == null) return emptyList()
-                    return list.filter { it.remoteUrl == null }.map { profile ->
-                        val entry = ContentsManager.getEntryName(profile)
-                        val firstDash = entry.indexOf('-')
-                        if (firstDash >= 0 && firstDash + 1 < entry.length) entry.substring(firstDash + 1) else entry
-                    }
-                }
-
-                dxvkVersionsAll = (dxvkVersionsBase + profilesToDisplay(mgr.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_DXVK))).distinct()
-                vkd3dVersions = (vkd3dVersionsBase + profilesToDisplay(mgr.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_VKD3D))).distinct()
-                box64BionicVersions = (box64BionicVersionsBase + profilesToDisplay(mgr.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_BOX64))).distinct()
-                wowBox64Versions = (wowBox64Versions + profilesToDisplay(mgr.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_WOWBOX64))).distinct()
-                fexcoreVersions = (fexcoreVersionsBase + profilesToDisplay(mgr.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_FEXCORE))).distinct()
-                val customWine = profilesToDisplay(mgr.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_WINE))
-                val customProton = profilesToDisplay(mgr.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_PROTON))
-                bionicWineEntries = (bionicWineEntriesBase + customProton + customWine).distinct()
-            } catch (_: Exception) {}
-            versionsLoaded = true
-        }
         val languages = listOf(
             "arabic",
             "bulgarian",
@@ -279,6 +358,263 @@ fun ContainerConfigDialog(
             "ukrainian",
             "vietnamese",
         )
+        val isBionicVariant = config.containerVariant.equals(Container.BIONIC, ignoreCase = true)
+        val manifestDownloadMessage = if (manifestDownloadLabel.isNotEmpty()) {
+            stringResource(R.string.manifest_downloading_item, manifestDownloadLabel)
+        } else {
+            stringResource(R.string.downloading)
+        }
+
+        val manifestDxvk = manifestData.items[ManifestContentTypes.DXVK].orEmpty()
+        val manifestVkd3d = manifestData.items[ManifestContentTypes.VKD3D].orEmpty()
+        val manifestBox64 = manifestData.items[ManifestContentTypes.BOX64].orEmpty()
+        val manifestWowBox64 = manifestData.items[ManifestContentTypes.WOWBOX64].orEmpty()
+        val manifestFexcore = manifestData.items[ManifestContentTypes.FEXCORE].orEmpty()
+        val manifestDrivers = manifestData.items[ManifestContentTypes.DRIVER].orEmpty()
+        val manifestWine = manifestData.items[ManifestContentTypes.WINE].orEmpty()
+        val manifestProton = manifestData.items[ManifestContentTypes.PROTON].orEmpty()
+
+        val dxvkOptions = remember(dxvkVersionsBase, installedDxvk, manifestDxvk) {
+            buildVersionOptionList(dxvkVersionsBase, installedDxvk, manifestDxvk)
+        }
+        val vkd3dOptions = remember(vkd3dVersionsBase, installedVkd3d, manifestVkd3d) {
+            buildVersionOptionList(vkd3dVersionsBase, installedVkd3d, manifestVkd3d)
+        }
+        val box64Options = remember(box64Versions, installedBox64, manifestBox64) {
+            buildVersionOptionList(box64Versions, installedBox64, manifestBox64)
+        }
+        val box64BionicOptions = remember(box64BionicVersionsBase, installedBox64, manifestBox64) {
+            buildVersionOptionList(box64BionicVersionsBase, installedBox64, manifestBox64)
+        }
+        val wowBox64Options = remember(wowBox64VersionsBase, installedWowBox64, manifestWowBox64) {
+            buildVersionOptionList(wowBox64VersionsBase, installedWowBox64, manifestWowBox64)
+        }
+        val fexcoreOptions = remember(fexcoreVersionsBase, installedFexcore, manifestFexcore) {
+            buildVersionOptionList(fexcoreVersionsBase, installedFexcore, manifestFexcore)
+        }
+        val wrapperOptions = remember(baseWrapperVersions, installedWrapperDrivers, manifestDrivers) {
+            buildVersionOptionList(baseWrapperVersions, installedWrapperDrivers, manifestDrivers)
+        }
+
+        val bionicWineManifest = remember(manifestWine, manifestProton) {
+            filterManifestByVariant(manifestWine, "bionic") + filterManifestByVariant(manifestProton, "bionic")
+        }
+        val glibcWineManifest = remember(manifestWine, manifestProton) {
+            filterManifestByVariant(manifestWine, "glibc") + filterManifestByVariant(manifestProton, "glibc")
+        }
+        val bionicWineOptions = remember(bionicWineEntriesBase, installedWine, installedProton, bionicWineManifest) {
+            buildVersionOptionList(bionicWineEntriesBase, installedWine + installedProton, bionicWineManifest)
+        }
+        val glibcWineOptions = remember(glibcWineEntriesBase, glibcWineManifest) {
+            buildVersionOptionList(glibcWineEntriesBase, emptyList(), glibcWineManifest)
+        }
+
+        val dxvkManifestById = remember(manifestDxvk) {
+            manifestDxvk.associateBy { it.id.lowercase(Locale.ENGLISH) }
+        }
+        val vkd3dManifestById = remember(manifestVkd3d) {
+            manifestVkd3d.associateBy { it.id.lowercase(Locale.ENGLISH) }
+        }
+        val box64ManifestById = remember(manifestBox64) {
+            manifestBox64.associateBy { it.id.lowercase(Locale.ENGLISH) }
+        }
+        val wowBox64ManifestById = remember(manifestWowBox64) {
+            manifestWowBox64.associateBy { it.id.lowercase(Locale.ENGLISH) }
+        }
+        val fexcoreManifestById = remember(manifestFexcore) {
+            manifestFexcore.associateBy { it.id.lowercase(Locale.ENGLISH) }
+        }
+        val wrapperManifestById = remember(manifestDrivers) {
+            manifestDrivers.associateBy { it.id.lowercase(Locale.ENGLISH) }
+        }
+        val bionicWineManifestById = remember(bionicWineManifest) {
+            bionicWineManifest.associateBy { it.id.lowercase(Locale.ENGLISH) }
+        }
+        val glibcWineManifestById = remember(glibcWineManifest) {
+            glibcWineManifest.associateBy { it.id.lowercase(Locale.ENGLISH) }
+        }
+
+        suspend fun refreshInstalledLists() {
+            val wrapperDrivers = withContext(Dispatchers.IO) {
+                try {
+                    AdrenotoolsManager(context).enumarateInstalledDrivers()
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }
+
+            val contentLists = withContext(Dispatchers.IO) {
+                try {
+                    val mgr = ContentsManager(context)
+                    mgr.syncContents()
+
+                    fun profilesToDisplay(
+                        list: List<ContentProfile>?,
+                    ): List<String> {
+                        if (list == null) return emptyList()
+                        return list.filter { profile -> profile.remoteUrl == null }.map { profile ->
+                            val entry = ContentsManager.getEntryName(profile)
+                            val firstDash = entry.indexOf('-')
+                            if (firstDash >= 0 && firstDash + 1 < entry.length) entry.substring(firstDash + 1) else entry
+                        }
+                    }
+
+                    fun profilesToDisplayDedup(
+                        list: List<ContentProfile>?,
+                        seen: MutableSet<Pair<ContentProfile.ContentType, String>>,
+                    ): List<String> {
+                        if (list == null) return emptyList()
+                        return list.filter { profile ->
+                            profile.remoteUrl == null && seen.add(Pair(profile.type, profile.verName))
+                        }.map { profile ->
+                            val entry = ContentsManager.getEntryName(profile)
+                            val firstDash = entry.indexOf('-')
+                            if (firstDash >= 0 && firstDash + 1 < entry.length) entry.substring(firstDash + 1) else entry
+                        }
+                    }
+
+                    val wineProtonSeen = mutableSetOf<Pair<ContentProfile.ContentType, String>>()
+                    InstalledContentLists(
+                        dxvk = profilesToDisplay(
+                            mgr.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_DXVK),
+                        ),
+                        vkd3d = profilesToDisplay(
+                            mgr.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_VKD3D),
+                        ),
+                        box64 = profilesToDisplay(
+                            mgr.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_BOX64),
+                        ),
+                        wowBox64 = profilesToDisplay(
+                            mgr.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_WOWBOX64),
+                        ),
+                        fexcore = profilesToDisplay(
+                            mgr.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_FEXCORE),
+                        ),
+                        wine = profilesToDisplayDedup(
+                            mgr.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_WINE),
+                            wineProtonSeen,
+                        ),
+                        proton = profilesToDisplayDedup(
+                            mgr.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_PROTON),
+                            wineProtonSeen,
+                        ),
+                    )
+                } catch (_: Exception) {
+                    InstalledContentLists(
+                        dxvk = emptyList(),
+                        vkd3d = emptyList(),
+                        box64 = emptyList(),
+                        wowBox64 = emptyList(),
+                        fexcore = emptyList(),
+                        wine = emptyList(),
+                        proton = emptyList(),
+                    )
+                }
+            }
+
+            installedWrapperDrivers = wrapperDrivers
+            installedDxvk = contentLists.dxvk
+            installedVkd3d = contentLists.vkd3d
+            installedBox64 = contentLists.box64
+            installedWowBox64 = contentLists.wowBox64
+            installedFexcore = contentLists.fexcore
+            installedWine = contentLists.wine
+            installedProton = contentLists.proton
+
+            wrapperVersions = (baseWrapperVersions + wrapperDrivers).distinct()
+            dxvkVersionsAll = (dxvkVersionsBase + contentLists.dxvk).distinct()
+            vkd3dVersions = (vkd3dVersionsBase + contentLists.vkd3d).distinct()
+            box64BionicVersions = (box64BionicVersionsBase + contentLists.box64).distinct()
+            wowBox64Versions = (wowBox64VersionsBase + contentLists.wowBox64).distinct()
+            fexcoreVersions = (fexcoreVersionsBase + contentLists.fexcore).distinct()
+            bionicWineEntries = (bionicWineEntriesBase + contentLists.proton + contentLists.wine).distinct()
+            glibcWineEntries = glibcWineEntriesBase
+        }
+
+        LaunchedEffect(Unit) {
+            refreshInstalledLists()
+            manifestData = ManifestRepository.loadManifest(context)
+            versionsLoaded = true
+        }
+
+        fun launchManifestContentInstall(
+            entry: ManifestEntry,
+            expectedType: ContentProfile.ContentType,
+            onInstalled: () -> Unit,
+        ) {
+            if (manifestInstallInProgress) return
+            manifestInstallInProgress = true
+            showManifestDownloadDialog = true
+            manifestDownloadProgress = -1f
+            manifestDownloadLabel = entry.name
+            Toast.makeText(
+                context,
+                context.getString(R.string.manifest_downloading_item, entry.name),
+                Toast.LENGTH_SHORT,
+            ).show()
+            installScope.launch {
+                try {
+                    val result = ManifestInstaller.downloadAndInstallContent(
+                        context,
+                        entry,
+                        expectedType,
+                        onProgress = { progress ->
+                            val clamped = progress.coerceIn(0f, 1f)
+                            installScope.launch(Dispatchers.Main.immediate) {
+                                manifestDownloadProgress = clamped
+                            }
+                        },
+                    )
+                    if (result.success) {
+                        refreshInstalledLists()
+                        onInstalled()
+                    }
+                    Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
+                } finally {
+                    manifestInstallInProgress = false
+                    showManifestDownloadDialog = false
+                    manifestDownloadProgress = -1f
+                    manifestDownloadLabel = ""
+                }
+            }
+        }
+
+        fun launchManifestDriverInstall(entry: ManifestEntry, onInstalled: () -> Unit) {
+            if (manifestInstallInProgress) return
+            manifestInstallInProgress = true
+            showManifestDownloadDialog = true
+            manifestDownloadProgress = -1f
+            manifestDownloadLabel = entry.name
+            Toast.makeText(
+                context,
+                context.getString(R.string.manifest_downloading_item, entry.name),
+                Toast.LENGTH_SHORT,
+            ).show()
+            installScope.launch {
+                try {
+                    val result = ManifestInstaller.downloadAndInstallDriver(
+                        context,
+                        entry,
+                        onProgress = { progress ->
+                            val clamped = progress.coerceIn(0f, 1f)
+                            installScope.launch(Dispatchers.Main.immediate) {
+                                manifestDownloadProgress = clamped
+                            }
+                        },
+                    )
+                    if (result.success) {
+                        refreshInstalledLists()
+                        onInstalled()
+                    }
+                    Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
+                } finally {
+                    manifestInstallInProgress = false
+                    showManifestDownloadDialog = false
+                    manifestDownloadProgress = -1f
+                    manifestDownloadLabel = ""
+                }
+            }
+        }
         // Vortek/Adreno graphics driver config (vkMaxVersion, imageCacheSize, exposedDeviceExtensions)
         var vkMaxVersionIndex by rememberSaveable { mutableIntStateOf(3) }
         var imageCacheIndex by rememberSaveable { mutableIntStateOf(2) }
@@ -415,11 +751,11 @@ fun ContainerConfigDialog(
             sharpnessDenoise = config.sharpnessDenoise.coerceIn(0, 100)
         }
 
-        LaunchedEffect(versionsLoaded, wrapperVersions, config.graphicsDriverConfig) {
+        LaunchedEffect(versionsLoaded, wrapperOptions, config.graphicsDriverConfig) {
             if (!versionsLoaded) return@LaunchedEffect
             val cfg = KeyValueSet(config.graphicsDriverConfig)
             val ver = cfg.get("version", DefaultVersion.WRAPPER)
-            val newIdx = wrapperVersions.indexOfFirst { it == ver }.coerceAtLeast(0)
+            val newIdx = wrapperOptions.ids.indexOfFirst { it.equals(ver, true) }.coerceAtLeast(0)
             if (wrapperVersionIndex != newIdx) wrapperVersionIndex = newIdx
         }
 
@@ -461,15 +797,16 @@ fun ContainerConfigDialog(
             }
         }
 
-        fun getVersionsForBox64(): List<String> {
-            if (config.wineVersion.equals(MAIN_WINE_VERSION.identifier())) {
-                return box64Versions
+        fun getVersionsForBox64(): VersionOptionList {
+            return if (config.wineVersion.equals(MAIN_WINE_VERSION.identifier())) {
+                box64Options
             } else if (config.wineVersion.contains("x86_64", true)) {
-                return box64BionicVersions
+                box64BionicOptions
             } else if (config.wineVersion.contains("arm64ec", true)) {
-                return wowBox64Versions
+                wowBox64Options
+            } else {
+                box64Options
             }
-            return box64Versions
         }
 
         fun getStartupSelectionOptions(): List<String> {
@@ -511,22 +848,54 @@ fun ContainerConfigDialog(
                 val driverType = StringUtils.parseIdentifier(graphicsDrivers[graphicsDriverIndex])
                 val isVortekLike = config.containerVariant.equals(Container.GLIBC) && driverType == "vortek" || driverType == "adreno" || driverType == "sd-8-elite"
                 val isVKD3D = StringUtils.parseIdentifier(dxWrappers[dxWrapperIndex]) == "vkd3d"
+                val constrainedLabels = listOf("1.10.3", "1.10.9-sarek", "1.9.2", "async-1.10.3")
+                val constrainedIds = constrainedLabels.map { StringUtils.parseIdentifier(it) }
+                val useConstrained =
+                    !inspectionMode && isVortekLike && GPUHelper.vkGetApiVersionSafe() < GPUHelper.vkMakeVersion(
+                        1,
+                        3,
+                        0
+                    )
                 val items =
-                    if (!inspectionMode && isVortekLike && GPUHelper.vkGetApiVersionSafe() < GPUHelper.vkMakeVersion(
-                            1,
-                            3,
-                            0
-                        )
-                    ) listOf("1.10.3", "1.10.9-sarek", "1.9.2", "async-1.10.3") else dxvkVersionsAll
+                    if (useConstrained) constrainedLabels
+                    else if (isBionicVariant) dxvkOptions.labels
+                    else dxvkVersionsBase
+                val itemIds =
+                    if (useConstrained) constrainedIds
+                    else if (isBionicVariant) dxvkOptions.ids
+                    else dxvkVersionsBase.map { StringUtils.parseIdentifier(it) }
+                val itemMuted =
+                    if (useConstrained) List(items.size) { false }
+                    else if (isBionicVariant) dxvkOptions.muted
+                    else null
                 if (!isVKD3D) {
                     SettingsListDropdown(
                         colors = settingsTileColors(),
                         title = { Text(text = stringResource(R.string.dxvk_version)) },
                         value = dxvkVersionIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0)),
                         items = items,
+                        itemMuted = itemMuted,
                         onItemSelected = {
                             dxvkVersionIndex = it
-                            val version = StringUtils.parseIdentifier(items[it])
+                            val selectedId = itemIds.getOrNull(it).orEmpty()
+                            val isManifestNotInstalled = isBionicVariant && itemMuted?.getOrNull(it) == true
+                            val manifestEntry = if (isBionicVariant) dxvkManifestById[selectedId.lowercase(Locale.ENGLISH)] else null
+                            if (isManifestNotInstalled && manifestEntry != null) {
+                                launchManifestContentInstall(
+                                    manifestEntry,
+                                    ContentProfile.ContentType.CONTENT_TYPE_DXVK,
+                                ) {
+                                    val currentConfig = KeyValueSet(config.dxwrapperConfig)
+                                    currentConfig.put("version", selectedId)
+                                    if (selectedId.contains("async", ignoreCase = true)) currentConfig.put("async", "1")
+                                    else currentConfig.put("async", "0")
+                                    if (selectedId.contains("gplasync", ignoreCase = true)) currentConfig.put("asyncCache", "1")
+                                    else currentConfig.put("asyncCache", "0")
+                                    config = config.copy(dxwrapperConfig = currentConfig.toString())
+                                }
+                                return@SettingsListDropdown
+                            }
+                            val version = selectedId.ifEmpty { StringUtils.parseIdentifier(items[it]) }
                             val currentConfig = KeyValueSet(config.dxwrapperConfig)
                             currentConfig.put("version", version)
                             val envVarsSet = EnvVars(config.envVars)
@@ -551,19 +920,36 @@ fun ContainerConfigDialog(
                 val isVKD3D = StringUtils.parseIdentifier(dxWrappers[dxWrapperIndex]) == "vkd3d"
                 if (isVKD3D) {
                     val label = "VKD3D Version"
-                    val availableVersions = vkd3dVersions
+                    val availableVersions = if (isBionicVariant) vkd3dOptions.labels else vkd3dVersionsBase
+                    val availableIds = if (isBionicVariant) vkd3dOptions.ids else vkd3dVersionsBase
+                    val availableMuted = if (isBionicVariant) vkd3dOptions.muted else null
                     val selectedVersion =
                         KeyValueSet(config.dxwrapperConfig).get("vkd3dVersion").ifEmpty { vkd3dForcedVersion() }
-                    val selectedIndex = availableVersions.indexOf(selectedVersion).coerceAtLeast(0)
+                    val selectedIndex = availableIds.indexOf(selectedVersion).coerceAtLeast(0)
 
                     SettingsListDropdown(
                         colors = settingsTileColors(),
                         title = { Text(text = label) },
                         value = selectedIndex,
                         items = availableVersions,
+                        itemMuted = availableMuted,
                         onItemSelected = { idx ->
+                            val selectedId = availableIds.getOrNull(idx).orEmpty()
+                            val isManifestNotInstalled = isBionicVariant && availableMuted?.getOrNull(idx) == true
+                            val manifestEntry = if (isBionicVariant) vkd3dManifestById[selectedId.lowercase(Locale.ENGLISH)] else null
+                            if (isManifestNotInstalled && manifestEntry != null) {
+                                launchManifestContentInstall(
+                                    manifestEntry,
+                                    ContentProfile.ContentType.CONTENT_TYPE_VKD3D,
+                                ) {
+                                    val currentConfig = KeyValueSet(config.dxwrapperConfig)
+                                    currentConfig.put("vkd3dVersion", selectedId)
+                                    config = config.copy(dxwrapperConfig = currentConfig.toString())
+                                }
+                                return@SettingsListDropdown
+                            }
                             val currentConfig = KeyValueSet(config.dxwrapperConfig)
-                            currentConfig.put("vkd3dVersion", availableVersions[idx])
+                            currentConfig.put("vkd3dVersion", selectedId.ifEmpty { availableVersions[idx] })
                             config = config.copy(dxwrapperConfig = currentConfig.toString())
                         },
                     )
@@ -601,18 +987,33 @@ fun ContainerConfigDialog(
             }
             mutableIntStateOf(driverIndex)
         }
-        fun currentDxvkContext(): Pair<Boolean, List<String>> {
-            val driverType    = StringUtils.parseIdentifier(graphicsDrivers[graphicsDriverIndex])
-            val isVortekLike  = config.containerVariant.equals(Container.GLIBC) && driverType in listOf("vortek", "adreno", "sd-8-elite")
+        fun currentDxvkContext(): DxvkContext {
+            val driverType = StringUtils.parseIdentifier(graphicsDrivers[graphicsDriverIndex])
+            val isVortekLike = config.containerVariant.equals(Container.GLIBC) && driverType in listOf("vortek", "adreno", "sd-8-elite")
 
-            val isVKD3D       = StringUtils.parseIdentifier(dxWrappers[dxWrapperIndex]) == "vkd3d"
-            val constrained   = if (!inspectionMode && isVortekLike && GPUHelper.vkGetApiVersionSafe() < GPUHelper.vkMakeVersion(1, 3, 0))
-                listOf("1.10.3", "1.10.9-sarek", "1.9.2", "async-1.10.3")
-            else
-                dxvkVersionsAll
+            val isVKD3D = StringUtils.parseIdentifier(dxWrappers[dxWrapperIndex]) == "vkd3d"
+            val constrainedLabels = listOf("1.10.3", "1.10.9-sarek", "1.9.2", "async-1.10.3")
+            val constrainedIds = constrainedLabels.map { StringUtils.parseIdentifier(it) }
+            val useConstrained = !inspectionMode && isVortekLike && GPUHelper.vkGetApiVersionSafe() < GPUHelper.vkMakeVersion(1, 3, 0)
 
-            val effectiveList = if (isVKD3D) emptyList() else constrained
-            return isVortekLike to effectiveList
+            val labels =
+                if (useConstrained) constrainedLabels
+                else if (isBionicVariant) dxvkOptions.labels
+                else dxvkVersionsBase
+            val ids =
+                if (useConstrained) constrainedIds
+                else if (isBionicVariant) dxvkOptions.ids
+                else dxvkVersionsBase.map { StringUtils.parseIdentifier(it) }
+            val muted =
+                if (useConstrained) List(labels.size) { false }
+                else if (isBionicVariant) dxvkOptions.muted
+                else emptyList()
+
+            return if (isVKD3D) {
+                DxvkContext(isVortekLike, emptyList(), emptyList(), emptyList())
+            } else {
+                DxvkContext(isVortekLike, labels, ids, muted)
+            }
         }
         // Keep dxwrapperConfig in sync when VKD3D selected
         LaunchedEffect(graphicsDriverIndex, dxWrapperIndex) {
@@ -630,26 +1031,27 @@ fun ContainerConfigDialog(
             }
         }
 
-        LaunchedEffect(versionsLoaded, dxvkVersionsAll, graphicsDriverIndex, dxWrapperIndex, config.dxwrapperConfig) {
+        LaunchedEffect(versionsLoaded, dxvkOptions, dxvkVersionsBase, graphicsDriverIndex, dxWrapperIndex, config.dxwrapperConfig) {
             if (!versionsLoaded) return@LaunchedEffect
             val kvs = KeyValueSet(config.dxwrapperConfig)
             val configuredVersion = kvs.get("version")
-            val (_, effectiveList) = currentDxvkContext()
-            val foundIndex = effectiveList.indexOfFirst { StringUtils.parseIdentifier(it) == configuredVersion }
-            val defaultIndex = effectiveList.indexOfFirst { StringUtils.parseIdentifier(it) == DefaultVersion.DXVK }.coerceAtLeast(0)
+            val context = currentDxvkContext()
+            if (context.ids.isEmpty()) return@LaunchedEffect
+            val foundIndex = context.ids.indexOfFirst { it == configuredVersion }
+            val defaultIndex = context.ids.indexOfFirst { it == DefaultVersion.DXVK }.coerceAtLeast(0)
             val newIdx = if (foundIndex >= 0) foundIndex else defaultIndex
             if (dxvkVersionIndex != newIdx) dxvkVersionIndex = newIdx
         }
         // When DXVK version defaults to an 'async' build, enable DXVK_ASYNC by default
         LaunchedEffect(dxvkVersionIndex, graphicsDriverIndex, dxWrapperIndex) {
-            val (isVortekLike, effectiveList) = currentDxvkContext()
-            if (dxvkVersionIndex !in effectiveList.indices) dxvkVersionIndex = 0
+            val context = currentDxvkContext()
+            if (context.ids.isEmpty()) return@LaunchedEffect
+            if (dxvkVersionIndex !in context.ids.indices) dxvkVersionIndex = 0
 
             // Ensure index within range or default
-            val selectedDisplay = effectiveList.getOrNull(dxvkVersionIndex)
-            val selectedVersion = StringUtils.parseIdentifier(selectedDisplay ?: "")
+            val selectedVersion = context.ids.getOrNull(dxvkVersionIndex).orEmpty()
             val version = if (selectedVersion.isEmpty()) {
-                if (isVortekLike) "async-1.10.3" else StringUtils.parseIdentifier(dxvkVersionsAll.getOrNull(dxvkVersionIndex) ?: DefaultVersion.DXVK)
+                if (context.isVortekLike) "async-1.10.3" else DefaultVersion.DXVK
             } else selectedVersion
             val envSet = EnvVars(config.envVars)
             // Update dxwrapperConfig version only when DXVK wrapper selected
@@ -812,6 +1214,11 @@ fun ContainerConfigDialog(
         )
         val aspectResolutionError = stringResource(
             R.string.container_config_custom_resolution_error_aspect
+        )
+        LoadingDialog(
+            visible = showManifestDownloadDialog,
+            progress = manifestDownloadProgress,
+            message = manifestDownloadMessage,
         )
         if (showCustomResolutionDialog) {
             AlertDialog(
@@ -1177,9 +1584,10 @@ fun ContainerConfigDialog(
                                                 bcnEmulationCacheEnabled = newCfg.get("bcnEmulationCache", "0") == "1"
                                                 adrenotoolsTurnipChecked = true
 
+                                                val defaultGlibcWine = glibcWineEntries.firstOrNull() ?: Container.DEFAULT_WINE_VERSION
                                                 config = config.copy(
                                                     containerVariant = newVariant,
-                                                    wineVersion = glibcWineEntries.first(),
+                                                    wineVersion = defaultGlibcWine,
                                                     graphicsDriver = defaultDriver,
                                                     graphicsDriverVersion = "",
                                                     graphicsDriverConfig = newCfg.toString(),
@@ -1189,8 +1597,9 @@ fun ContainerConfigDialog(
                                                 // Switch to bionic: set wrapper defaults
                                                 val defaultBionicDriver = StringUtils.parseIdentifier(bionicGraphicsDrivers.first())
                                                 val newWine =
-                                                    if (config.wineVersion == glibcWineEntries.first()) bionicWineEntries.firstOrNull()
-                                                        ?: config.wineVersion else config.wineVersion
+                                                    if (config.wineVersion == (glibcWineEntries.firstOrNull() ?: Container.DEFAULT_WINE_VERSION))
+                                                        bionicWineEntries.firstOrNull() ?: config.wineVersion
+                                                    else config.wineVersion
                                                 val newCfg = KeyValueSet(config.graphicsDriverConfig).apply {
                                                     put("version", DefaultVersion.WRAPPER)
                                                     put("syncFrame", "0")
@@ -1205,7 +1614,8 @@ fun ContainerConfigDialog(
                                                     if (get("bcnEmulationCache").isEmpty()) put("bcnEmulationCache", "0")
                                                 }
                                                 bionicDriverIndex = 0
-                                                wrapperVersionIndex = wrapperVersions.indexOfFirst { it == DefaultVersion.WRAPPER }
+                                                wrapperVersionIndex = wrapperOptions.ids
+                                                    .indexOfFirst { it.equals(DefaultVersion.WRAPPER, true) }
                                                     .let { if (it >= 0) it else 0 }
                                                 syncEveryFrameChecked = false
                                                 disablePresentWaitChecked = newCfg.get("disablePresentWait", "0") == "1"
@@ -1235,14 +1645,29 @@ fun ContainerConfigDialog(
                                     )
                                     // Wine version only if bionic variant
                                     if (config.containerVariant.equals(Container.BIONIC, ignoreCase = true)) {
-                                        val wineIndex = bionicWineEntries.indexOfFirst { it == config.wineVersion }.coerceAtLeast(0)
+                                        val wineIndex = bionicWineOptions.ids.indexOfFirst { it == config.wineVersion }.coerceAtLeast(0)
                                         SettingsListDropdown(
                                             colors = settingsTileColors(),
                                             title = { Text(text = stringResource(R.string.wine_version)) },
                                             value = wineIndex,
-                                            items = bionicWineEntries,
+                                            items = bionicWineOptions.labels,
+                                            itemMuted = bionicWineOptions.muted,
                                             onItemSelected = { idx ->
-                                                config = config.copy(wineVersion = bionicWineEntries[idx])
+                                                val selectedId = bionicWineOptions.ids.getOrNull(idx).orEmpty()
+                                                val isManifestNotInstalled = bionicWineOptions.muted.getOrNull(idx) == true
+                                                val manifestEntry = bionicWineManifestById[selectedId.lowercase(Locale.ENGLISH)]
+                                                if (isManifestNotInstalled && manifestEntry != null) {
+                                                    val expectedType = if (selectedId.startsWith("proton", true)) {
+                                                        ContentProfile.ContentType.CONTENT_TYPE_PROTON
+                                                    } else {
+                                                        ContentProfile.ContentType.CONTENT_TYPE_WINE
+                                                    }
+                                                    launchManifestContentInstall(manifestEntry, expectedType) {
+                                                        config = config.copy(wineVersion = selectedId)
+                                                    }
+                                                    return@SettingsListDropdown
+                                                }
+                                                config = config.copy(wineVersion = selectedId.ifEmpty { bionicWineOptions.labels[idx] })
                                             },
                                         )
                                     }
@@ -1405,11 +1830,23 @@ fun ContainerConfigDialog(
                                         colors = settingsTileColors(),
                                         title = { Text(text = stringResource(R.string.graphics_driver_version)) },
                                         value = wrapperVersionIndex,
-                                        items = wrapperVersions,
+                                        items = wrapperOptions.labels,
+                                        itemMuted = wrapperOptions.muted,
                                         onItemSelected = { idx ->
                                             wrapperVersionIndex = idx
+                                            val selectedId = wrapperOptions.ids.getOrNull(idx).orEmpty()
+                                            val isManifestNotInstalled = wrapperOptions.muted.getOrNull(idx) == true
+                                            val manifestEntry = wrapperManifestById[selectedId.lowercase(Locale.ENGLISH)]
+                                            if (isManifestNotInstalled && manifestEntry != null) {
+                                                launchManifestDriverInstall(manifestEntry) {
+                                                    val cfg = KeyValueSet(config.graphicsDriverConfig)
+                                                    cfg.put("version", selectedId)
+                                                    config = config.copy(graphicsDriverConfig = cfg.toString())
+                                                }
+                                                return@SettingsListDropdown
+                                            }
                                             val cfg = KeyValueSet(config.graphicsDriverConfig)
-                                            cfg.put("version", wrapperVersions[idx])
+                                            cfg.put("version", selectedId)
                                             config = config.copy(graphicsDriverConfig = cfg.toString())
                                         },
                                     )
@@ -1721,13 +2158,27 @@ fun ContainerConfigDialog(
                                     run {
                                         if (wineIsArm64Ec) {
                                             SettingsGroup() {
+                                                val fexcoreIndex = fexcoreOptions.ids.indexOfFirst { it == config.fexcoreVersion }.coerceAtLeast(0)
                                                 SettingsListDropdown(
                                                     colors = settingsTileColors(),
                                                     title = { Text(text = stringResource(R.string.fexcore_version)) },
-                                                    value = fexcoreVersions.indexOfFirst { it == config.fexcoreVersion }.coerceAtLeast(0),
-                                                    items = fexcoreVersions,
+                                                    value = fexcoreIndex,
+                                                    items = fexcoreOptions.labels,
+                                                    itemMuted = fexcoreOptions.muted,
                                                     onItemSelected = { idx ->
-                                                        config = config.copy(fexcoreVersion = fexcoreVersions[idx])
+                                                        val selectedId = fexcoreOptions.ids.getOrNull(idx).orEmpty()
+                                                        val isManifestNotInstalled = fexcoreOptions.muted.getOrNull(idx) == true
+                                                        val manifestEntry = fexcoreManifestById[selectedId.lowercase(Locale.ENGLISH)]
+                                                        if (isManifestNotInstalled && manifestEntry != null) {
+                                                            launchManifestContentInstall(
+                                                                manifestEntry,
+                                                                ContentProfile.ContentType.CONTENT_TYPE_FEXCORE,
+                                                            ) {
+                                                                config = config.copy(fexcoreVersion = selectedId)
+                                                            }
+                                                            return@SettingsListDropdown
+                                                        }
+                                                        config = config.copy(fexcoreVersion = selectedId.ifEmpty { fexcoreOptions.labels[idx] })
                                                     },
                                                 )
                                             }
@@ -1783,15 +2234,35 @@ fun ContainerConfigDialog(
                                         }
                                     }
                                 }
+                                val box64OptionList = getVersionsForBox64()
+                                val box64Index = box64OptionList.ids.indexOfFirst { it == config.box64Version }.coerceAtLeast(0)
+                                val box64ManifestMap = if (config.wineVersion.contains("arm64ec", true)) {
+                                    wowBox64ManifestById
+                                } else {
+                                    box64ManifestById
+                                }
                                 SettingsListDropdown(
                                     colors = settingsTileColors(),
                                     title = { Text(text = stringResource(R.string.box64_version)) },
-                                    value = getVersionsForBox64().indexOfFirst { StringUtils.parseIdentifier(it) == config.box64Version }.coerceAtLeast(0),
-                                    items = getVersionsForBox64(),
-                                    onItemSelected = {
-                                        config = config.copy(
-                                            box64Version = StringUtils.parseIdentifier(getVersionsForBox64()[it]),
-                                        )
+                                    value = box64Index,
+                                    items = box64OptionList.labels,
+                                    itemMuted = box64OptionList.muted,
+                                    onItemSelected = { idx ->
+                                        val selectedId = box64OptionList.ids.getOrNull(idx).orEmpty()
+                                        val isManifestNotInstalled = box64OptionList.muted.getOrNull(idx) == true
+                                        val manifestEntry = box64ManifestMap[selectedId.lowercase(Locale.ENGLISH)]
+                                        if (isManifestNotInstalled && manifestEntry != null) {
+                                            val expectedType = if (config.wineVersion.contains("arm64ec", true)) {
+                                                ContentProfile.ContentType.CONTENT_TYPE_WOWBOX64
+                                            } else {
+                                                ContentProfile.ContentType.CONTENT_TYPE_BOX64
+                                            }
+                                            launchManifestContentInstall(manifestEntry, expectedType) {
+                                                config = config.copy(box64Version = selectedId)
+                                            }
+                                            return@SettingsListDropdown
+                                        }
+                                        config = config.copy(box64Version = selectedId.ifEmpty { StringUtils.parseIdentifier(box64OptionList.labels[idx]) })
                                     },
                                 )
                                 SettingsListDropdown(

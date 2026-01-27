@@ -982,6 +982,13 @@
     <string name="gog_logout_success">成功從 GOG 登出</string>
     <string name="gog_logout_failed">登出失敗: %s</string>
     <string name="gog_logout_in_progress">正在從 GOG 登出…</string>
+    <string name="manifest_downloading_item">Downloading %1$s...</string>
+    <string name="manifest_download_failed">Download failed: %1$s</string>
+    <string name="manifest_install_failed">Failed to install %1$s</string>
+    <string name="manifest_install_success">%1$s installed</string>
+    <string name="manifest_content_untrusted">Content is not trusted and was not installed.</string>
+    <string name="manifest_type_mismatch">Downloaded content does not match expected type.</string>
+    <string name="manifest_glibc_not_supported">GLIBC builds are not supported.</string>
 </resources>
 
 

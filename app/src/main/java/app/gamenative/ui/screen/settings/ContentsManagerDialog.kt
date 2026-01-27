@@ -171,6 +171,7 @@ fun ContentsManagerDialog(open: Boolean, onDismiss: () -> Unit) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = 460.dp)
+                    .verticalScroll(rememberScrollState())
             ) {
                 Text(
                     text = "Install additional components (.wcp: tar.xz/zst)",
