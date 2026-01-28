@@ -371,19 +371,21 @@ fun ContainerConfigDialog(
             versionsLoaded = true
         }
 
-        fun launchManifestContentInstall(
+        fun launchManifestInstall(
             entry: ManifestEntry,
-            expectedType: ContentProfile.ContentType,
+            label: String,
+            isDriver: Boolean,
+            expectedType: ContentProfile.ContentType?,
             onInstalled: () -> Unit,
         ) {
             if (manifestInstallInProgress) return
             manifestInstallInProgress = true
             showManifestDownloadDialog = true
             manifestDownloadProgress = -1f
-            manifestDownloadLabel = entry.id
+            manifestDownloadLabel = label
             Toast.makeText(
                 context,
-                context.getString(R.string.manifest_downloading_item, entry.id),
+                context.getString(R.string.manifest_downloading_item, label),
                 Toast.LENGTH_SHORT,
             ).show()
             installScope.launch {
@@ -391,7 +393,7 @@ fun ContainerConfigDialog(
                     val result = ManifestInstaller.installManifestEntry(
                         context = context,
                         entry = entry,
-                        isDriver = false,
+                        isDriver = isDriver,
                         contentType = expectedType,
                         onProgress = { progress ->
                             val clamped = progress.coerceIn(0f, 1f)
@@ -414,43 +416,26 @@ fun ContainerConfigDialog(
             }
         }
 
-        fun launchManifestDriverInstall(entry: ManifestEntry, onInstalled: () -> Unit) {
-            if (manifestInstallInProgress) return
-            manifestInstallInProgress = true
-            showManifestDownloadDialog = true
-            manifestDownloadProgress = -1f
-            manifestDownloadLabel = entry.name
-            Toast.makeText(
-                context,
-                context.getString(R.string.manifest_downloading_item, entry.name),
-                Toast.LENGTH_SHORT,
-            ).show()
-            installScope.launch {
-                try {
-                    val result = ManifestInstaller.installManifestEntry(
-                        context = context,
-                        entry = entry,
-                        isDriver = true,
-                        onProgress = { progress ->
-                            val clamped = progress.coerceIn(0f, 1f)
-                            installScope.launch(Dispatchers.Main.immediate) {
-                                manifestDownloadProgress = clamped
-                            }
-                        },
-                    )
-                    if (result.success) {
-                        refreshInstalledLists()
-                        onInstalled()
-                    }
-                    Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
-                } finally {
-                    manifestInstallInProgress = false
-                    showManifestDownloadDialog = false
-                    manifestDownloadProgress = -1f
-                    manifestDownloadLabel = ""
-                }
-            }
-        }
+        fun launchManifestContentInstall(
+            entry: ManifestEntry,
+            expectedType: ContentProfile.ContentType,
+            onInstalled: () -> Unit,
+        ) = launchManifestInstall(
+            entry = entry,
+            label = entry.id,
+            isDriver = false,
+            expectedType = expectedType,
+            onInstalled = onInstalled,
+        )
+
+        fun launchManifestDriverInstall(entry: ManifestEntry, onInstalled: () -> Unit) =
+            launchManifestInstall(
+                entry = entry,
+                label = entry.name,
+                isDriver = true,
+                expectedType = null,
+                onInstalled = onInstalled,
+            )
         // Vortek/Adreno graphics driver config (vkMaxVersion, imageCacheSize, exposedDeviceExtensions)
         var vkMaxVersionIndex by rememberSaveable { mutableIntStateOf(3) }
         var imageCacheIndex by rememberSaveable { mutableIntStateOf(2) }
