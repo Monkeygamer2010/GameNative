@@ -115,44 +115,25 @@ private suspend fun installMissingComponentsForConfig(
                 ),
             )
         }
-        val result = if (request.isDriver) {
-            ManifestInstaller.downloadAndInstallDriver(
-                context,
-                request.entry,
-                onProgress = { progress ->
-                    val clamped = progress.coerceIn(0f, 1f)
-                    uiScope.launch {
-                        SteamAppScreen.showKnownConfigInstallState(
-                            gameId,
-                            KnownConfigInstallState(
-                                visible = true,
-                                progress = clamped,
-                                label = label,
-                            ),
-                        )
-                    }
-                },
-            )
-        } else {
-            ManifestInstaller.downloadAndInstallContent(
-                context,
-                request.entry,
-                request.contentType ?: return false,
-                onProgress = { progress ->
-                    val clamped = progress.coerceIn(0f, 1f)
-                    uiScope.launch {
-                        SteamAppScreen.showKnownConfigInstallState(
-                            gameId,
-                            KnownConfigInstallState(
-                                visible = true,
-                                progress = clamped,
-                                label = label,
-                            ),
-                        )
-                    }
-                },
-            )
-        }
+        val result = ManifestInstaller.installManifestEntry(
+            context = context,
+            entry = request.entry,
+            isDriver = request.isDriver,
+            contentType = request.contentType,
+            onProgress = { progress ->
+                val clamped = progress.coerceIn(0f, 1f)
+                uiScope.launch {
+                    SteamAppScreen.showKnownConfigInstallState(
+                        gameId,
+                        KnownConfigInstallState(
+                            visible = true,
+                            progress = clamped,
+                            label = label,
+                        ),
+                    )
+                }
+            },
+        )
         withContext(Dispatchers.Main) {
             Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
         }

@@ -50,6 +50,29 @@ object ManifestInstaller {
         }
     }
 
+    /**
+     * Shared helper to install a single manifest entry (driver or content).
+     *
+     * UI layers should provide [onProgress] to update their own state and then
+     * handle the returned [ManifestInstallResult] (e.g. to show a Toast or
+     * refresh installed-content lists).
+     */
+    suspend fun installManifestEntry(
+        context: Context,
+        entry: ManifestEntry,
+        isDriver: Boolean,
+        contentType: ContentProfile.ContentType? = null,
+        onProgress: (Float) -> Unit = {},
+    ): ManifestInstallResult {
+        return if (isDriver) {
+            downloadAndInstallDriver(context, entry, onProgress)
+        } else {
+            val type = contentType
+                ?: throw IllegalArgumentException("contentType must be provided when installing manifest content")
+            downloadAndInstallContent(context, entry, type, onProgress)
+        }
+    }
+
     suspend fun downloadAndInstallContent(
         context: Context,
         entry: ManifestEntry,
