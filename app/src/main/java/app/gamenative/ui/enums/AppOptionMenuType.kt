@@ -1,9 +1,6 @@
 package app.gamenative.ui.enums
 
-import android.content.Context
-import app.gamenative.R
-
-enum class AppOptionMenuType(val text: String, val textRes: Int? = null) {
+enum class AppOptionMenuType(val text: String) {
     StorePage("Open store page"),
     CreateShortcut("Create shortcut"),
     ExportFrontend("Export for frontend"),
@@ -14,8 +11,8 @@ enum class AppOptionMenuType(val text: String, val textRes: Int? = null) {
     SubmitFeedback("Submit feedback"),
     ResetDrm("Reset DRM"),
     UseKnownConfig("Use known config"),
-    ImportConfig("", R.string.import_config),
-    ExportConfig("", R.string.export_config),
+    ImportConfig("Import config"),
+    ExportConfig("Export config"),
     Uninstall("Uninstall"),
     VerifyFiles("Verify files"),
     Update("Update"),
@@ -27,6 +24,4 @@ enum class AppOptionMenuType(val text: String, val textRes: Int? = null) {
     FetchSteamGridDBImages("Fetch game images"),
     TestGraphics("Test graphics"),
     ManageGameContent("Manage DLC");
-
-    fun displayText(context: Context): String = textRes?.let(context::getString) ?: text
 }

@@ -369,7 +369,7 @@ internal fun AppScreenContent(
                 ) {
                     optionsMenu.forEach { menuOption ->
                         DropdownMenuItem(
-                            text = { Text(menuOption.optionType.displayText(context)) },
+                            text = { Text(menuOption.optionType.text) },
                             onClick = {
                                 menuOption.onClick()
                                 optionsMenuVisible = false
