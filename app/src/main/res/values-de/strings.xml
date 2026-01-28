@@ -760,10 +760,13 @@
     <string name="best_config_fallback_match">Bekannte Konfiguration könnte funktionieren</string>
     <string name="best_config_compatibility_unknown">Keine bekannte Konfiguration</string>
     <!-- Best Config Toast Messages -->
-    <string name="best_config_applied_successfully">Beste Konfiguration erfolgreich übernommen</string>
+    <string name="best_config_applied_successfully">Konfiguration erfolgreich übernommen</string>
     <string name="best_config_known_config_invalid">Bekannte Konfiguration ungültig</string>
     <string name="best_config_no_config_available">Keine optimale Konfiguration verfügbar</string>
     <string name="best_config_apply_failed">Konfiguration konnte nicht übernommen werden: %s</string>
+    <string name="best_config_missing_content">%s fehlt</string>
+    <string name="import_config">Konfiguration importieren</string>
+    <string name="export_config">Konfiguration exportieren</string>
     <string name="library_app_type">App-Typ</string>
     <string name="library_app_status">App-Status</string>
     <string name="library_layout">Layout</string>

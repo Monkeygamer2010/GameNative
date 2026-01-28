@@ -811,10 +811,13 @@
     <string name="best_config_compatibility_unknown">没有已知配置</string>
 
     <!-- 最佳配置提示消息 -->
-    <string name="best_config_applied_successfully">最佳配置已成功应用</string>
+    <string name="best_config_applied_successfully">配置已成功应用</string>
     <string name="best_config_known_config_invalid">已知配置无效</string>
     <string name="best_config_no_config_available">此游戏没有可用的最佳配置</string>
     <string name="best_config_apply_failed">应用配置失败：%s</string>
+    <string name="best_config_missing_content">%s 缺失</string>
+    <string name="import_config">导入配置</string>
+    <string name="export_config">导出配置</string>
 
     <string name="library_app_type">应用程序类型</string>
     <string name="library_app_status">应用程序状态</string>

@@ -86,6 +86,7 @@ import app.gamenative.ui.theme.settingsTileColors
 import app.gamenative.ui.theme.settingsTileColorsAlt
 import app.gamenative.utils.CustomGameScanner
 import app.gamenative.utils.ContainerUtils
+import app.gamenative.utils.ManifestComponentHelper
 import app.gamenative.utils.ManifestContentTypes
 import app.gamenative.utils.ManifestData
 import app.gamenative.utils.ManifestEntry
@@ -93,8 +94,6 @@ import app.gamenative.utils.ManifestInstaller
 import app.gamenative.utils.ManifestRepository
 import app.gamenative.service.SteamService
 import com.winlator.contents.ContentProfile
-import com.winlator.contents.ContentsManager
-import com.winlator.contents.AdrenotoolsManager
 import com.alorma.compose.settings.ui.SettingsGroup
 import com.alorma.compose.settings.ui.SettingsMenuLink
 import com.alorma.compose.settings.ui.SettingsSwitch
@@ -210,14 +209,6 @@ private fun buildVersionOptionList(
         ids = values.map { it.id },
         muted = values.map { it.isManifest && !it.isInstalled },
     )
-}
-
-private fun filterManifestByVariant(entries: List<ManifestEntry>, variant: String?): List<ManifestEntry> {
-    if (variant.isNullOrBlank()) return entries
-    return entries.filter { entry ->
-        val entryVariant = entry.variant?.lowercase(Locale.ENGLISH)
-        entryVariant == variant.lowercase(Locale.ENGLISH) || entryVariant.isNullOrEmpty()
-    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -397,10 +388,12 @@ fun ContainerConfigDialog(
         }
 
         val bionicWineManifest = remember(manifestWine, manifestProton) {
-            filterManifestByVariant(manifestWine, "bionic") + filterManifestByVariant(manifestProton, "bionic")
+            ManifestComponentHelper.filterManifestByVariant(manifestWine, "bionic") +
+                ManifestComponentHelper.filterManifestByVariant(manifestProton, "bionic")
         }
         val glibcWineManifest = remember(manifestWine, manifestProton) {
-            filterManifestByVariant(manifestWine, "glibc") + filterManifestByVariant(manifestProton, "glibc")
+            ManifestComponentHelper.filterManifestByVariant(manifestWine, "glibc") +
+                ManifestComponentHelper.filterManifestByVariant(manifestProton, "glibc")
         }
         val bionicWineOptions = remember(bionicWineEntriesBase, installedWine, installedProton, bionicWineManifest) {
             buildVersionOptionList(bionicWineEntriesBase, installedWine + installedProton, bionicWineManifest)
@@ -435,99 +428,24 @@ fun ContainerConfigDialog(
         }
 
         suspend fun refreshInstalledLists() {
-            val wrapperDrivers = withContext(Dispatchers.IO) {
-                try {
-                    AdrenotoolsManager(context).enumarateInstalledDrivers()
-                } catch (_: Exception) {
-                    emptyList()
-                }
-            }
+            val installedLists = ManifestComponentHelper.loadInstalledContentLists(context)
 
-            val contentLists = withContext(Dispatchers.IO) {
-                try {
-                    val mgr = ContentsManager(context)
-                    mgr.syncContents()
+            installedWrapperDrivers = installedLists.installedDrivers
+            installedDxvk = installedLists.installed.dxvk
+            installedVkd3d = installedLists.installed.vkd3d
+            installedBox64 = installedLists.installed.box64
+            installedWowBox64 = installedLists.installed.wowBox64
+            installedFexcore = installedLists.installed.fexcore
+            installedWine = installedLists.installed.wine
+            installedProton = installedLists.installed.proton
 
-                    fun profilesToDisplay(
-                        list: List<ContentProfile>?,
-                    ): List<String> {
-                        if (list == null) return emptyList()
-                        return list.filter { profile -> profile.remoteUrl == null }.map { profile ->
-                            val entry = ContentsManager.getEntryName(profile)
-                            val firstDash = entry.indexOf('-')
-                            if (firstDash >= 0 && firstDash + 1 < entry.length) entry.substring(firstDash + 1) else entry
-                        }
-                    }
-
-                    fun profilesToDisplayDedup(
-                        list: List<ContentProfile>?,
-                        seen: MutableSet<Pair<ContentProfile.ContentType, String>>,
-                    ): List<String> {
-                        if (list == null) return emptyList()
-                        return list.filter { profile ->
-                            profile.remoteUrl == null && seen.add(Pair(profile.type, profile.verName))
-                        }.map { profile ->
-                            val entry = ContentsManager.getEntryName(profile)
-                            val firstDash = entry.indexOf('-')
-                            if (firstDash >= 0 && firstDash + 1 < entry.length) entry.substring(firstDash + 1) else entry
-                        }
-                    }
-
-                    val wineProtonSeen = mutableSetOf<Pair<ContentProfile.ContentType, String>>()
-                    InstalledContentLists(
-                        dxvk = profilesToDisplay(
-                            mgr.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_DXVK),
-                        ),
-                        vkd3d = profilesToDisplay(
-                            mgr.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_VKD3D),
-                        ),
-                        box64 = profilesToDisplay(
-                            mgr.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_BOX64),
-                        ),
-                        wowBox64 = profilesToDisplay(
-                            mgr.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_WOWBOX64),
-                        ),
-                        fexcore = profilesToDisplay(
-                            mgr.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_FEXCORE),
-                        ),
-                        wine = profilesToDisplayDedup(
-                            mgr.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_WINE),
-                            wineProtonSeen,
-                        ),
-                        proton = profilesToDisplayDedup(
-                            mgr.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_PROTON),
-                            wineProtonSeen,
-                        ),
-                    )
-                } catch (_: Exception) {
-                    InstalledContentLists(
-                        dxvk = emptyList(),
-                        vkd3d = emptyList(),
-                        box64 = emptyList(),
-                        wowBox64 = emptyList(),
-                        fexcore = emptyList(),
-                        wine = emptyList(),
-                        proton = emptyList(),
-                    )
-                }
-            }
-
-            installedWrapperDrivers = wrapperDrivers
-            installedDxvk = contentLists.dxvk
-            installedVkd3d = contentLists.vkd3d
-            installedBox64 = contentLists.box64
-            installedWowBox64 = contentLists.wowBox64
-            installedFexcore = contentLists.fexcore
-            installedWine = contentLists.wine
-            installedProton = contentLists.proton
-
-            wrapperVersions = (baseWrapperVersions + wrapperDrivers).distinct()
-            dxvkVersionsAll = (dxvkVersionsBase + contentLists.dxvk).distinct()
-            vkd3dVersions = (vkd3dVersionsBase + contentLists.vkd3d).distinct()
-            box64BionicVersions = (box64BionicVersionsBase + contentLists.box64).distinct()
-            wowBox64Versions = (wowBox64VersionsBase + contentLists.wowBox64).distinct()
-            fexcoreVersions = (fexcoreVersionsBase + contentLists.fexcore).distinct()
-            bionicWineEntries = (bionicWineEntriesBase + contentLists.proton + contentLists.wine).distinct()
+            wrapperVersions = (baseWrapperVersions + installedLists.installedDrivers).distinct()
+            dxvkVersionsAll = (dxvkVersionsBase + installedLists.installed.dxvk).distinct()
+            vkd3dVersions = (vkd3dVersionsBase + installedLists.installed.vkd3d).distinct()
+            box64BionicVersions = (box64BionicVersionsBase + installedLists.installed.box64).distinct()
+            wowBox64Versions = (wowBox64VersionsBase + installedLists.installed.wowBox64).distinct()
+            fexcoreVersions = (fexcoreVersionsBase + installedLists.installed.fexcore).distinct()
+            bionicWineEntries = (bionicWineEntriesBase + installedLists.installed.proton + installedLists.installed.wine).distinct()
             glibcWineEntries = glibcWineEntriesBase
         }
 
@@ -1035,15 +953,22 @@ fun ContainerConfigDialog(
             if (!versionsLoaded) return@LaunchedEffect
             val kvs = KeyValueSet(config.dxwrapperConfig)
             val configuredVersion = kvs.get("version")
+            if (configuredVersion.isEmpty()) return@LaunchedEffect
             val context = currentDxvkContext()
             if (context.ids.isEmpty()) return@LaunchedEffect
-            val foundIndex = context.ids.indexOfFirst { it == configuredVersion }
-            val defaultIndex = context.ids.indexOfFirst { it == DefaultVersion.DXVK }.coerceAtLeast(0)
+            val normalizedConfiguredVersion = StringUtils.parseIdentifier(configuredVersion)
+            val foundIndex = context.ids.indexOfFirst { 
+                it == configuredVersion || StringUtils.parseIdentifier(it) == normalizedConfiguredVersion
+            }
+            val defaultIndex = context.ids.indexOfFirst { 
+                it == DefaultVersion.DXVK || StringUtils.parseIdentifier(it) == StringUtils.parseIdentifier(DefaultVersion.DXVK)
+            }.coerceAtLeast(0)
             val newIdx = if (foundIndex >= 0) foundIndex else defaultIndex
             if (dxvkVersionIndex != newIdx) dxvkVersionIndex = newIdx
         }
         // When DXVK version defaults to an 'async' build, enable DXVK_ASYNC by default
-        LaunchedEffect(dxvkVersionIndex, graphicsDriverIndex, dxWrapperIndex) {
+        LaunchedEffect(versionsLoaded, dxvkVersionIndex, graphicsDriverIndex, dxWrapperIndex) {
+            if (!versionsLoaded) return@LaunchedEffect
             val context = currentDxvkContext()
             if (context.ids.isEmpty()) return@LaunchedEffect
             if (dxvkVersionIndex !in context.ids.indices) dxvkVersionIndex = 0
@@ -1057,8 +982,15 @@ fun ContainerConfigDialog(
             // Update dxwrapperConfig version only when DXVK wrapper selected
             val wrapperIsDxvk = StringUtils.parseIdentifier(dxWrappers[dxWrapperIndex]) == "dxvk"
             val kvs = KeyValueSet(config.dxwrapperConfig)
+            val currentVersion = kvs.get("version")
+            // Only update if the version actually changed (don't overwrite on initial load if it matches)
             if (wrapperIsDxvk) {
-                kvs.put("version", version)
+                // Check if we need to update - only if current version doesn't match selected version
+                val needsUpdate = currentVersion.isEmpty() || 
+                    (currentVersion != version && StringUtils.parseIdentifier(currentVersion) != StringUtils.parseIdentifier(version))
+                if (needsUpdate) {
+                    kvs.put("version", version)
+                }
             }
             if (version.contains("async", ignoreCase = true)) {
                 kvs.put("async", "1")

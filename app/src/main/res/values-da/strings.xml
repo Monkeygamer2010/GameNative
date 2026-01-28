@@ -653,10 +653,13 @@
     <string name="best_config_compatibility_unknown">Ingen kendt konfiguration</string>
 
     <!-- Best Config Toast Messages -->
-    <string name="best_config_applied_successfully">Bedste konfiguration anvendt med succes</string>
+    <string name="best_config_applied_successfully">Konfiguration anvendt med succes</string>
     <string name="best_config_known_config_invalid">Kendt konfiguration ugyldig</string>
     <string name="best_config_no_config_available">Ingen bedste konfiguration tilgængelig for dette spil</string>
     <string name="best_config_apply_failed">Kunne ikke anvende konfiguration: %s</string>
+    <string name="best_config_missing_content">%s mangler</string>
+    <string name="import_config">Importér konfiguration</string>
+    <string name="export_config">Eksportér konfiguration</string>
 
     <string name="library_app_type">App-type</string>
     <string name="library_app_status">App-status</string>

@@ -207,7 +207,6 @@ fun ContentsManagerDialog(open: Boolean, onDismiss: () -> Unit) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .verticalScroll(rememberScrollState())
                             .padding(top = 8.dp)
                     ) {
                         InfoRow(label = "Type", value = profile.type.toString())
@@ -293,7 +292,6 @@ fun ContentsManagerDialog(open: Boolean, onDismiss: () -> Unit) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .verticalScroll(rememberScrollState())
                             .padding(top = 8.dp)
                     ) {
                         installedProfiles.forEach { p ->
