@@ -5,7 +5,6 @@ import com.winlator.contents.AdrenotoolsManager
 import com.winlator.contents.ContentProfile
 import com.winlator.contents.ContentsManager
 import com.winlator.core.StringUtils
-import com.winlator.core.GPUHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -46,7 +45,7 @@ object ManifestComponentHelper {
     )
 
     fun filterManifestByVariant(entries: List<ManifestEntry>, variant: String?): List<ManifestEntry> {
-        return entries.filter { entry -> entry.variant?.lowercase(Locale.ENGLISH) == variant.lowercase(Locale.ENGLISH) }
+        return entries.filter { entry -> entry.variant?.lowercase(Locale.ENGLISH) == variant?.lowercase(Locale.ENGLISH) }
     }
 
     suspend fun loadInstalledContentLists(
@@ -59,10 +58,9 @@ object ManifestComponentHelper {
             mgr.syncContents()
 
             fun profilesToDisplay(
-                list: List<ContentProfile>?,
+                type: ContentProfile.ContentType,
             ): List<String> {
-                if (list == null) return emptyList()
-                return list
+                return mgr.getProfiles(type)
                     .filter { profile -> profile.remoteUrl == null }
                     .map { profile -> profile.verName.orEmpty() }
             }
@@ -95,7 +93,7 @@ object ManifestComponentHelper {
     }
 
     fun buildAvailableVersions(base: List<String>, installed: List<String>, manifest: List<ManifestEntry>, ): List<String> {
-        return (base + installed + manifestIds + manifest.map { it.id }).distinct()
+        return (base + installed + manifest.map { it.id }).distinct()
     }
 
     fun buildVersionOptionList(base: List<String>, installed: List<String>, manifest: List<ManifestEntry>, ): VersionOptionList {
@@ -110,7 +108,7 @@ object ManifestComponentHelper {
         manifest.forEach { entry ->
             if (!options.containsKey(entry.id)) {
                 val isInstalled = availableIds.contains(entry.id)
-                addOption(entry.id, entry.id, isManifest = true, isInstalled = isInstalled)
+                options[entry.id] = VersionOption(entry.id, entry.id, isManifest = true, isInstalled = isInstalled)
             }
         }
 
