@@ -104,7 +104,7 @@ private suspend fun installMissingComponentsForConfig(
     }
 
     for (request in missingRequests) {
-        val label = request.entry.name
+        val label = request.entry.id
         uiScope.launch {
             SteamAppScreen.showKnownConfigInstallState(
                 gameId,

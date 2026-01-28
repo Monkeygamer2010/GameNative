@@ -380,10 +380,10 @@ fun ContainerConfigDialog(
             manifestInstallInProgress = true
             showManifestDownloadDialog = true
             manifestDownloadProgress = -1f
-            manifestDownloadLabel = entry.name
+            manifestDownloadLabel = entry.id
             Toast.makeText(
                 context,
-                context.getString(R.string.manifest_downloading_item, entry.name),
+                context.getString(R.string.manifest_downloading_item, entry.id),
                 Toast.LENGTH_SHORT,
             ).show()
             installScope.launch {
