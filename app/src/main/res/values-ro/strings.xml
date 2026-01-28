@@ -993,11 +993,11 @@
 	<string name="gog_logout_success">Deconectare reușită de la GOG</string>
 	<string name="gog_logout_failed">Deconectare eșuată: %s</string>
 	<string name="gog_logout_in_progress">Se deconectează de la GOG…</string>
-    <string name="manifest_downloading_item">Downloading %1$s...</string>
-    <string name="manifest_download_failed">Download failed: %1$s</string>
-    <string name="manifest_install_failed">Failed to install %1$s</string>
-    <string name="manifest_install_success">%1$s installed</string>
-    <string name="manifest_content_untrusted">Content is not trusted and was not installed.</string>
-    <string name="manifest_type_mismatch">Downloaded content does not match expected type.</string>
-    <string name="manifest_glibc_not_supported">GLIBC builds are not supported.</string>
+    <string name="manifest_downloading_item">Se descarcă %1$s…</string>
+    <string name="manifest_download_failed">Descărcarea a eșuat: %1$s</string>
+    <string name="manifest_install_failed">Instalarea %1$s a eșuat</string>
+    <string name="manifest_install_success">%1$s instalat cu succes</string>
+    <string name="manifest_content_untrusted">Conținutul nu este de încredere și nu a fost instalat.</string>
+    <string name="manifest_type_mismatch">Conținutul descărcat nu corespunde tipului așteptat.</string>
+    <string name="manifest_glibc_not_supported">Build-urile GLIBC nu sunt acceptate.</string>
 </resources>

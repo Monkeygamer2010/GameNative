@@ -988,13 +988,13 @@
     <string name="gog_logout_success">Déconnecté de GOG avec succès</string>
     <string name="gog_logout_failed">Échec de la déconnexion : %s</string>
     <string name="gog_logout_in_progress">Déconnexion de GOG…</string>
-    <string name="manifest_downloading_item">Downloading %1$s...</string>
-    <string name="manifest_download_failed">Download failed: %1$s</string>
-    <string name="manifest_install_failed">Failed to install %1$s</string>
-    <string name="manifest_install_success">%1$s installed</string>
-    <string name="manifest_content_untrusted">Content is not trusted and was not installed.</string>
-    <string name="manifest_type_mismatch">Downloaded content does not match expected type.</string>
-    <string name="manifest_glibc_not_supported">GLIBC builds are not supported.</string>
+    <string name="manifest_downloading_item">Téléchargement de %1$s…</string>
+    <string name="manifest_download_failed">Échec du téléchargement : %1$s</string>
+    <string name="manifest_install_failed">Échec de l’installation de %1$s</string>
+    <string name="manifest_install_success">%1$s installé</string>
+    <string name="manifest_content_untrusted">Le contenu n’est pas fiable et n’a pas été installé.</string>
+    <string name="manifest_type_mismatch">Le contenu téléchargé ne correspond pas au type attendu.</string>
+    <string name="manifest_glibc_not_supported">Les builds GLIBC ne sont pas pris en charge.</string>
 </resources>
 
 
