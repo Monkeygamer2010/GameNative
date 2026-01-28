@@ -93,6 +93,7 @@ import app.gamenative.utils.ManifestEntry
 import app.gamenative.utils.ManifestInstaller
 import app.gamenative.service.SteamService
 import app.gamenative.utils.ManifestComponentHelper.VersionOptionList
+import app.gamenative.utils.ManifestRepository
 import com.winlator.contents.ContentProfile
 import com.alorma.compose.settings.ui.SettingsGroup
 import com.alorma.compose.settings.ui.SettingsMenuLink
@@ -217,6 +218,7 @@ fun ContainerConfigDialog(
         val bionicGraphicsDrivers = stringArrayResource(R.array.bionic_graphics_driver_entries).toList()
         val baseWrapperVersions = stringArrayResource(R.array.wrapper_graphics_driver_version_entries).toList()
         var wrapperVersions by remember { mutableStateOf(baseWrapperVersions) }
+        var dxvkVersionsAll by remember { mutableStateOf(dxvkVersionsBase) }
         var componentAvailability by remember { mutableStateOf<ManifestComponentHelper.ComponentAvailability?>(null) }
         var manifestInstallInProgress by remember { mutableStateOf(false) }
         var showManifestDownloadDialog by remember { mutableStateOf(false) }
@@ -360,7 +362,7 @@ fun ContainerConfigDialog(
             val manifest = ManifestRepository.loadManifest(context)
 
             wrapperVersions = (baseWrapperVersions + installed.installedDrivers).distinct()
-            bionicWineEntries = (bionicWineEntriesBase + installed.proton + installed.wine).distinct()
+            bionicWineEntries = (bionicWineEntriesBase + installed.installed.proton + installed.installed.wine).distinct()
             glibcWineEntries = glibcWineEntriesBase
         }
 
@@ -840,29 +842,20 @@ fun ContainerConfigDialog(
             val kvs = KeyValueSet(config.dxwrapperConfig)
             val configuredVersion = kvs.get("version")
             if (configuredVersion.isEmpty()) return@LaunchedEffect
-            val context = currentDxvkContext()
-            if (context.ids.isEmpty()) return@LaunchedEffect
-            val normalizedConfiguredVersion = StringUtils.parseIdentifier(configuredVersion)
-            val foundIndex = context.ids.indexOfFirst {
-                it == configuredVersion || StringUtils.parseIdentifier(it) == normalizedConfiguredVersion
-            }
-            val defaultIndex = context.ids.indexOfFirst {
-                it == DefaultVersion.DXVK || StringUtils.parseIdentifier(it) == StringUtils.parseIdentifier(DefaultVersion.DXVK)
-            }.coerceAtLeast(0)
+            val (_, effectiveList) = currentDxvkContext()
+            val foundIndex = effectiveList.indexOfFirst { StringUtils.parseIdentifier(it) == configuredVersion }
+            val defaultIndex = effectiveList.indexOfFirst { StringUtils.parseIdentifier(it) == DefaultVersion.DXVK }.coerceAtLeast(0)
             val newIdx = if (foundIndex >= 0) foundIndex else defaultIndex
             if (dxvkVersionIndex != newIdx) dxvkVersionIndex = newIdx
         }
         // When DXVK version defaults to an 'async' build, enable DXVK_ASYNC by default
         LaunchedEffect(versionsLoaded, dxvkVersionIndex, graphicsDriverIndex, dxWrapperIndex) {
-            if (!versionsLoaded) return@LaunchedEffect
-            val context = currentDxvkContext()
-            if (context.ids.isEmpty()) return@LaunchedEffect
-            if (dxvkVersionIndex !in context.ids.indices) dxvkVersionIndex = 0
-
-            // Ensure index within range or default
-            val selectedVersion = context.ids.getOrNull(dxvkVersionIndex).orEmpty()
+            val (isVortekLike, effectiveList) = currentDxvkContext()
+            if (dxvkVersionIndex !in effectiveList.indices) dxvkVersionIndex = 0
+            val selectedDisplay = effectiveList.getOrNull(dxvkVersionIndex)
+            val selectedVersion = StringUtils.parseIdentifier(selectedDisplay ?: "")
             val version = if (selectedVersion.isEmpty()) {
-                if (context.isVortekLike) "async-1.10.3" else DefaultVersion.DXVK
+                if (isVortekLike) "async-1.10.3" else StringUtils.parseIdentifier(dxvkVersionsAll.getOrNull(dxvkVersionIndex) ?: DefaultVersion.DXVK)
             } else selectedVersion
             val envSet = EnvVars(config.envVars)
             // Update dxwrapperConfig version only when DXVK wrapper selected
