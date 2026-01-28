@@ -5,7 +5,6 @@ import app.gamenative.PrefManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.decodeFromString
 import okhttp3.Request
 import timber.log.Timber
 
@@ -27,7 +26,7 @@ object ManifestRepository {
         val fetched = fetchManifestJson()
         if (fetched != null) {
             PrefManager.componentManifestJson = fetched
-            PrefManager.componentManifestFetchedAt = now
+            PrefManager.componentManifestFetchedAt = System.currentTimeMillis()
             return parseManifest(fetched) ?: cachedManifest
         }
 
