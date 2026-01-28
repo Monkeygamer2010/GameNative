@@ -3,6 +3,7 @@ package app.gamenative.utils
 import android.content.Context
 import android.net.Uri
 import app.gamenative.R
+import app.gamenative.service.SteamService
 import com.winlator.contents.AdrenotoolsManager
 import com.winlator.contents.ContentProfile
 import com.winlator.contents.ContentsManager
@@ -26,7 +27,8 @@ object ManifestInstaller {
     ): ManifestInstallResult = withContext(Dispatchers.IO) {
         var destFile: File? = null
         try {
-            destFile = ManifestRepository.downloadToCache(context, entry.url, onProgress)
+            destFile = File(context.cacheDir, entry.url.substringAfterLast("/"))
+            SteamService.fetchFile(entry.url, destFile, onProgress)
             val uri = Uri.fromFile(destFile)
             val name = AdrenotoolsManager(context).installDriver(uri)
             if (name.isEmpty()) {
@@ -81,7 +83,8 @@ object ManifestInstaller {
     ): ManifestInstallResult = withContext(Dispatchers.IO) {
         var destFile: File? = null
         try {
-            destFile = ManifestRepository.downloadToCache(context, entry.url, onProgress)
+            destFile = File(context.cacheDir, entry.url.substringAfterLast("/"))
+            SteamService.fetchFile(entry.url, destFile, onProgress)
             val uri = Uri.fromFile(destFile)
             val mgr = ContentsManager(context)
 
@@ -105,7 +108,7 @@ object ManifestInstaller {
                 expectedType == ContentProfile.ContentType.CONTENT_TYPE_PROTON
             ) {
                 val tmpDir = ContentsManager.getTmpDir(context)
-                val variant = detectBinaryVariant(tmpDir)
+                val variant = entry.variant
                 if (variant == "glibc") {
                     ContentsManager.cleanTmpDir(context)
                     return@withContext ManifestInstallResult(
@@ -200,32 +203,5 @@ object ManifestInstaller {
         }
         latch.await()
         success
-    }
-
-    private fun detectBinaryVariant(installDir: File): String {
-        return try {
-            val wine64 = File(installDir, "bin/wine64")
-            val wine = File(installDir, "bin/wine")
-            val binaryFile = when {
-                wine64.exists() -> wine64
-                wine.exists() -> wine
-                else -> return "unknown"
-            }
-
-            val bytes = binaryFile.inputStream().use { stream ->
-                val buffer = ByteArray(1024)
-                val read = stream.read(buffer)
-                buffer.copyOf(read)
-            }
-            val content = String(bytes, Charsets.ISO_8859_1)
-            when {
-                content.contains("/system/bin/linker") -> "bionic"
-                content.contains("/lib64/ld-linux") || content.contains("/lib/ld-linux") -> "glibc"
-                else -> "unknown"
-            }
-        } catch (e: Exception) {
-            Timber.e("Error detecting binary variant: $e")
-            "unknown"
-        }
     }
 }

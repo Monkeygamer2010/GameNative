@@ -356,12 +356,10 @@ fun ContainerConfigDialog(
         }
 
         suspend fun refreshInstalledLists() {
-            val availabilityUpdated = ManifestComponentHelper.loadComponentAvailability(context)
-            componentAvailability = availabilityUpdated
+            val installed = ManifestComponentHelper.loadInstalledContentLists(context)
+            val manifest = ManifestRepository.loadManifest(context)
 
-            val installed = availabilityUpdated.installed
-
-            wrapperVersions = (baseWrapperVersions + availabilityUpdated.installedDrivers).distinct()
+            wrapperVersions = (baseWrapperVersions + installed.installedDrivers).distinct()
             bionicWineEntries = (bionicWineEntriesBase + installed.proton + installed.wine).distinct()
             glibcWineEntries = glibcWineEntriesBase
         }
@@ -808,18 +806,19 @@ fun ContainerConfigDialog(
             }
             mutableIntStateOf(driverIndex)
         }
-        fun currentDxvkContext(): ManifestComponentHelper.DxvkContext =
-            ManifestComponentHelper.buildDxvkContext(
-                containerVariant = config.containerVariant,
-                graphicsDrivers = graphicsDrivers,
-                graphicsDriverIndex = graphicsDriverIndex,
-                dxWrappers = dxWrappers,
-                dxWrapperIndex = dxWrapperIndex,
-                inspectionMode = inspectionMode,
-                isBionicVariant = isBionicVariant,
-                dxvkVersionsBase = dxvkVersionsBase,
-                dxvkOptions = dxvkOptions,
-            )
+        fun currentDxvkContext(): Pair<Boolean, List<String>> {
+            val driverType    = StringUtils.parseIdentifier(graphicsDrivers[graphicsDriverIndex])
+            val isVortekLike  = config.containerVariant.equals(Container.GLIBC) && driverType in listOf("vortek", "adreno", "sd-8-elite")
+
+            val isVKD3D       = StringUtils.parseIdentifier(dxWrappers[dxWrapperIndex]) == "vkd3d"
+            val constrained   = if (!inspectionMode && isVortekLike && GPUHelper.vkGetApiVersionSafe() < GPUHelper.vkMakeVersion(1, 3, 0))
+                listOf("1.10.3", "1.10.9-sarek", "1.9.2", "async-1.10.3")
+            else
+                dxvkVersionsAll
+
+            val effectiveList = if (isVKD3D) emptyList() else constrained
+            return isVortekLike to effectiveList
+        }
         // Keep dxwrapperConfig in sync when VKD3D selected
         LaunchedEffect(graphicsDriverIndex, dxWrapperIndex) {
             val isVKD3D = StringUtils.parseIdentifier(dxWrappers[dxWrapperIndex]) == "vkd3d"

@@ -1,5 +1,8 @@
 package app.gamenative.utils
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 data class ManifestEntry(
     val id: String,
     val name: String,
@@ -8,6 +11,7 @@ data class ManifestEntry(
     val arch: String? = null,
 )
 
+@Serializable
 data class ManifestData(
     val version: Int?,
     val updatedAt: String?,
