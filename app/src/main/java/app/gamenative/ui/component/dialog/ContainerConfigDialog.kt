@@ -333,36 +333,38 @@ fun ContainerConfigDialog(
         }
 
         val dxvkManifestById = remember(manifestDxvk) {
-            manifestDxvk.associateBy { it.id.lowercase(Locale.ENGLISH) }
+            manifestDxvk.associateBy { StringUtils.parseIdentifier(it.id) }
         }
         val vkd3dManifestById = remember(manifestVkd3d) {
-            manifestVkd3d.associateBy { it.id.lowercase(Locale.ENGLISH) }
+            manifestVkd3d.associateBy { StringUtils.parseIdentifier(it.id) }
         }
         val box64ManifestById = remember(manifestBox64) {
-            manifestBox64.associateBy { it.id.lowercase(Locale.ENGLISH) }
+            manifestBox64.associateBy { StringUtils.parseIdentifier(it.id) }
         }
         val wowBox64ManifestById = remember(manifestWowBox64) {
-            manifestWowBox64.associateBy { it.id.lowercase(Locale.ENGLISH) }
+            manifestWowBox64.associateBy { StringUtils.parseIdentifier(it.id) }
         }
         val fexcoreManifestById = remember(manifestFexcore) {
-            manifestFexcore.associateBy { it.id.lowercase(Locale.ENGLISH) }
+            manifestFexcore.associateBy { StringUtils.parseIdentifier(it.id) }
         }
         val wrapperManifestById = remember(manifestDrivers) {
-            manifestDrivers.associateBy { it.id.lowercase(Locale.ENGLISH) }
+            manifestDrivers.associateBy { StringUtils.parseIdentifier(it.id) }
         }
         val bionicWineManifestById = remember(bionicWineManifest) {
-            bionicWineManifest.associateBy { it.id.lowercase(Locale.ENGLISH) }
+            bionicWineManifest.associateBy { StringUtils.parseIdentifier(it.id) }
         }
         val glibcWineManifestById = remember(glibcWineManifest) {
-            glibcWineManifest.associateBy { it.id.lowercase(Locale.ENGLISH) }
+            glibcWineManifest.associateBy { StringUtils.parseIdentifier(it.id) }
         }
 
         suspend fun refreshInstalledLists() {
-            val installed = ManifestComponentHelper.loadInstalledContentLists(context)
-            val manifest = ManifestRepository.loadManifest(context)
+            val availabilityUpdated = ManifestComponentHelper.loadComponentAvailability(context)
+            componentAvailability = availabilityUpdated
 
-            wrapperVersions = (baseWrapperVersions + installed.installedDrivers).distinct()
-            bionicWineEntries = (bionicWineEntriesBase + installed.installed.proton + installed.installed.wine).distinct()
+            val installed = availabilityUpdated.installed
+
+            wrapperVersions = (baseWrapperVersions + availabilityUpdated.installedDrivers).distinct()
+            bionicWineEntries = (bionicWineEntriesBase + installed.proton + installed.wine).distinct()
             glibcWineEntries = glibcWineEntriesBase
         }
 
@@ -431,7 +433,7 @@ fun ContainerConfigDialog(
         fun launchManifestDriverInstall(entry: ManifestEntry, onInstalled: () -> Unit) =
             launchManifestInstall(
                 entry = entry,
-                label = entry.name,
+                label = entry.id,
                 isDriver = true,
                 expectedType = null,
                 onInstalled = onInstalled,
@@ -700,7 +702,7 @@ fun ContainerConfigDialog(
                             dxvkVersionIndex = it
                             val selectedId = itemIds.getOrNull(it).orEmpty()
                             val isManifestNotInstalled = isBionicVariant && itemMuted?.getOrNull(it) == true
-                            val manifestEntry = if (isBionicVariant) dxvkManifestById[selectedId.lowercase(Locale.ENGLISH)] else null
+                            val manifestEntry = if (isBionicVariant) dxvkManifestById[selectedId] else null
                             if (isManifestNotInstalled && manifestEntry != null) {
                                 launchManifestContentInstall(
                                     manifestEntry,
@@ -757,7 +759,7 @@ fun ContainerConfigDialog(
                         onItemSelected = { idx ->
                             val selectedId = availableIds.getOrNull(idx).orEmpty()
                             val isManifestNotInstalled = isBionicVariant && availableMuted?.getOrNull(idx) == true
-                            val manifestEntry = if (isBionicVariant) vkd3dManifestById[selectedId.lowercase(Locale.ENGLISH)] else null
+                            val manifestEntry = if (isBionicVariant) vkd3dManifestById[selectedId] else null
                             if (isManifestNotInstalled && manifestEntry != null) {
                                 launchManifestContentInstall(
                                     manifestEntry,
@@ -808,19 +810,18 @@ fun ContainerConfigDialog(
             }
             mutableIntStateOf(driverIndex)
         }
-        fun currentDxvkContext(): Pair<Boolean, List<String>> {
-            val driverType    = StringUtils.parseIdentifier(graphicsDrivers[graphicsDriverIndex])
-            val isVortekLike  = config.containerVariant.equals(Container.GLIBC) && driverType in listOf("vortek", "adreno", "sd-8-elite")
-
-            val isVKD3D       = StringUtils.parseIdentifier(dxWrappers[dxWrapperIndex]) == "vkd3d"
-            val constrained   = if (!inspectionMode && isVortekLike && GPUHelper.vkGetApiVersionSafe() < GPUHelper.vkMakeVersion(1, 3, 0))
-                listOf("1.10.3", "1.10.9-sarek", "1.9.2", "async-1.10.3")
-            else
-                dxvkVersionsAll
-
-            val effectiveList = if (isVKD3D) emptyList() else constrained
-            return isVortekLike to effectiveList
-        }
+        fun currentDxvkContext(): ManifestComponentHelper.DxvkContext =
+            ManifestComponentHelper.buildDxvkContext(
+                containerVariant = config.containerVariant,
+                graphicsDrivers = graphicsDrivers,
+                graphicsDriverIndex = graphicsDriverIndex,
+                dxWrappers = dxWrappers,
+                dxWrapperIndex = dxWrapperIndex,
+                inspectionMode = inspectionMode,
+                isBionicVariant = isBionicVariant,
+                dxvkVersionsBase = dxvkVersionsBase,
+                dxvkOptions = dxvkOptions,
+            )
         // Keep dxwrapperConfig in sync when VKD3D selected
         LaunchedEffect(graphicsDriverIndex, dxWrapperIndex) {
             val isVKD3D = StringUtils.parseIdentifier(dxWrappers[dxWrapperIndex]) == "vkd3d"
@@ -842,20 +843,29 @@ fun ContainerConfigDialog(
             val kvs = KeyValueSet(config.dxwrapperConfig)
             val configuredVersion = kvs.get("version")
             if (configuredVersion.isEmpty()) return@LaunchedEffect
-            val (_, effectiveList) = currentDxvkContext()
-            val foundIndex = effectiveList.indexOfFirst { StringUtils.parseIdentifier(it) == configuredVersion }
-            val defaultIndex = effectiveList.indexOfFirst { StringUtils.parseIdentifier(it) == DefaultVersion.DXVK }.coerceAtLeast(0)
+            val context = currentDxvkContext()
+            if (context.ids.isEmpty()) return@LaunchedEffect
+            val normalizedConfiguredVersion = StringUtils.parseIdentifier(configuredVersion)
+            val foundIndex = context.ids.indexOfFirst {
+                it == configuredVersion || StringUtils.parseIdentifier(it) == normalizedConfiguredVersion
+            }
+            val defaultIndex = context.ids.indexOfFirst {
+                it == DefaultVersion.DXVK || StringUtils.parseIdentifier(it) == StringUtils.parseIdentifier(DefaultVersion.DXVK)
+            }.coerceAtLeast(0)
             val newIdx = if (foundIndex >= 0) foundIndex else defaultIndex
             if (dxvkVersionIndex != newIdx) dxvkVersionIndex = newIdx
         }
         // When DXVK version defaults to an 'async' build, enable DXVK_ASYNC by default
         LaunchedEffect(versionsLoaded, dxvkVersionIndex, graphicsDriverIndex, dxWrapperIndex) {
-            val (isVortekLike, effectiveList) = currentDxvkContext()
-            if (dxvkVersionIndex !in effectiveList.indices) dxvkVersionIndex = 0
-            val selectedDisplay = effectiveList.getOrNull(dxvkVersionIndex)
-            val selectedVersion = StringUtils.parseIdentifier(selectedDisplay ?: "")
+            if (!versionsLoaded) return@LaunchedEffect
+            val context = currentDxvkContext()
+            if (context.ids.isEmpty()) return@LaunchedEffect
+            if (dxvkVersionIndex !in context.ids.indices) dxvkVersionIndex = 0
+
+            // Ensure index within range or default
+            val selectedVersion = context.ids.getOrNull(dxvkVersionIndex).orEmpty()
             val version = if (selectedVersion.isEmpty()) {
-                if (isVortekLike) "async-1.10.3" else StringUtils.parseIdentifier(dxvkVersionsAll.getOrNull(dxvkVersionIndex) ?: DefaultVersion.DXVK)
+                if (context.isVortekLike) "async-1.10.3" else DefaultVersion.DXVK
             } else selectedVersion
             val envSet = EnvVars(config.envVars)
             // Update dxwrapperConfig version only when DXVK wrapper selected
@@ -1466,7 +1476,7 @@ fun ContainerConfigDialog(
                                             onItemSelected = { idx ->
                                                 val selectedId = bionicWineOptions.ids.getOrNull(idx).orEmpty()
                                                 val isManifestNotInstalled = bionicWineOptions.muted.getOrNull(idx) == true
-                                                val manifestEntry = bionicWineManifestById[selectedId.lowercase(Locale.ENGLISH)]
+                                                val manifestEntry = bionicWineManifestById[selectedId]
                                                 if (isManifestNotInstalled && manifestEntry != null) {
                                                     val expectedType = if (selectedId.startsWith("proton", true)) {
                                                         ContentProfile.ContentType.CONTENT_TYPE_PROTON
@@ -1647,7 +1657,7 @@ fun ContainerConfigDialog(
                                             wrapperVersionIndex = idx
                                             val selectedId = wrapperOptions.ids.getOrNull(idx).orEmpty()
                                             val isManifestNotInstalled = wrapperOptions.muted.getOrNull(idx) == true
-                                            val manifestEntry = wrapperManifestById[selectedId.lowercase(Locale.ENGLISH)]
+                                            val manifestEntry = wrapperManifestById[selectedId]
                                             if (isManifestNotInstalled && manifestEntry != null) {
                                                 launchManifestDriverInstall(manifestEntry) {
                                                     val cfg = KeyValueSet(config.graphicsDriverConfig)
@@ -1979,7 +1989,7 @@ fun ContainerConfigDialog(
                                                     onItemSelected = { idx ->
                                                         val selectedId = fexcoreOptions.ids.getOrNull(idx).orEmpty()
                                                         val isManifestNotInstalled = fexcoreOptions.muted.getOrNull(idx) == true
-                                                        val manifestEntry = fexcoreManifestById[selectedId.lowercase(Locale.ENGLISH)]
+                                                        val manifestEntry = fexcoreManifestById[selectedId]
                                                         if (isManifestNotInstalled && manifestEntry != null) {
                                                             launchManifestContentInstall(
                                                                 manifestEntry,
