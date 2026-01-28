@@ -984,7 +984,7 @@
     <string name="gog_logout_success">Disconnesso da GOG con successo</string>
     <string name="gog_logout_failed">Impossibile disconnettersi: %s</string>
     <string name="gog_logout_in_progress">Disconnessione da GOG…</string>
-    <string name="manifest_downloading_item">Downloading %1$s...</string>
+    <string name="manifest_downloading_item">Download di %1$s…</string>
     <string name="manifest_download_failed">Download failed: %1$s</string>
     <string name="manifest_install_failed">Failed to install %1$s</string>
     <string name="manifest_install_success">%1$s installed</string>

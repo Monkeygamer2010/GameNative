@@ -981,11 +981,11 @@
     <string name="gog_logout_success">成功从 GOG 注销</string>
     <string name="gog_logout_failed">注销失败: %s</string>
     <string name="gog_logout_in_progress">正在从 GOG 注销…</string>
-    <string name="manifest_downloading_item">Downloading %1$s...</string>
-    <string name="manifest_download_failed">Download failed: %1$s</string>
-    <string name="manifest_install_failed">Failed to install %1$s</string>
-    <string name="manifest_install_success">%1$s installed</string>
-    <string name="manifest_content_untrusted">Content is not trusted and was not installed.</string>
-    <string name="manifest_type_mismatch">Downloaded content does not match expected type.</string>
-    <string name="manifest_glibc_not_supported">GLIBC builds are not supported.</string>
+    <string name="manifest_downloading_item">正在下载 %1$s…</string>
+    <string name="manifest_download_failed">下载失败：%1$s</string>
+    <string name="manifest_install_failed">安装 %1$s 失败</string>
+    <string name="manifest_install_success">%1$s 已安装</string>
+    <string name="manifest_content_untrusted">内容不可信，未安装。</string>
+    <string name="manifest_type_mismatch">下载的内容与预期类型不匹配。</string>
+    <string name="manifest_glibc_not_supported">不支持 GLIBC 构建。</string>
 </resources>
