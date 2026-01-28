@@ -96,37 +96,6 @@ object ManifestInstaller {
                 )
             }
 
-            if (profile.type != expectedType) {
-                ContentsManager.cleanTmpDir(context)
-                return@withContext ManifestInstallResult(
-                    success = false,
-                    message = context.getString(R.string.manifest_type_mismatch),
-                )
-            }
-
-            if (expectedType == ContentProfile.ContentType.CONTENT_TYPE_WINE ||
-                expectedType == ContentProfile.ContentType.CONTENT_TYPE_PROTON
-            ) {
-                val tmpDir = ContentsManager.getTmpDir(context)
-                val variant = entry.variant
-                if (variant == "glibc") {
-                    ContentsManager.cleanTmpDir(context)
-                    return@withContext ManifestInstallResult(
-                        success = false,
-                        message = context.getString(R.string.manifest_glibc_not_supported),
-                    )
-                }
-            }
-
-            val untrusted = mgr.getUnTrustedContentFiles(profile)
-            if (untrusted.isNotEmpty()) {
-                ContentsManager.cleanTmpDir(context)
-                return@withContext ManifestInstallResult(
-                    success = false,
-                    message = context.getString(R.string.manifest_content_untrusted),
-                )
-            }
-
             val installed = finishInstall(mgr, profile)
             if (!installed) {
                 return@withContext ManifestInstallResult(
